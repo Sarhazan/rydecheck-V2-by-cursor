@@ -1,0 +1,17 @@
+.export-button {
+  background-color: #28a745;
+  color: white;
+  border: none;
+  padding: 0.75rem 1.5rem;
+  font-size: 1rem;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: bold;
+  transition: background-color 0.3s ease;
+  margin-left: 1rem;
+}
+
+.export-button:hover {
+  background-color: #218838;
+}
+

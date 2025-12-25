@@ -1,0 +1,175 @@
+.hori-upload-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 2rem;
+}
+
+.hori-upload-card {
+  width: 100%;
+  max-width: 500px;
+  background: white;
+  border: 2px solid #e0e0e0;
+  border-radius: 16px;
+  padding: 3rem 2.5rem;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 300px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.hori-upload-card:hover {
+  border-color: #007bff;
+  box-shadow: 0 4px 16px rgba(0, 123, 255, 0.15);
+  transform: translateY(-4px);
+}
+
+.hori-upload-card.dragging {
+  border-color: #007bff;
+  background-color: #f0f8ff;
+  transform: scale(1.05);
+  box-shadow: 0 8px 24px rgba(0, 123, 255, 0.3);
+  border-width: 3px;
+  animation: hori-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes hori-pulse {
+  0%, 100% {
+    box-shadow: 0 8px 24px rgba(0, 123, 255, 0.3);
+  }
+  50% {
+    box-shadow: 0 8px 32px rgba(0, 123, 255, 0.5);
+  }
+}
+
+.hori-upload-card.uploaded {
+  border-color: #28a745;
+  background-color: #f0fff4;
+}
+
+.hori-card-icon {
+  width: 64px;
+  height: 64px;
+  margin-bottom: 1.5rem;
+  color: #007bff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.hori-upload-card.uploaded .hori-card-icon {
+  color: #28a745;
+}
+
+.hori-card-title {
+  font-size: 1.5rem;
+  font-weight: bold;
+  color: #333;
+  margin: 0 0 1rem 0;
+  direction: rtl;
+}
+
+.hori-card-description {
+  font-size: 1rem;
+  color: #666;
+  margin: 0 0 2rem 0;
+  line-height: 1.6;
+  direction: rtl;
+}
+
+.hori-card-hint {
+  font-size: 0.95rem;
+  color: #999;
+  margin-top: 1rem;
+  direction: rtl;
+}
+
+.hori-card-file-input {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  top: 0;
+  left: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.hori-card-status {
+  font-size: 1.1rem;
+  color: #666;
+  margin-top: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  direction: rtl;
+}
+
+.hori-card-status.success {
+  color: #28a745;
+  font-weight: bold;
+}
+
+.hori-card-status.success span {
+  font-size: 1.5rem;
+}
+
+.hori-file-info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  direction: rtl;
+}
+
+.hori-file-name {
+  font-size: 1rem;
+  word-break: break-word;
+  max-width: 100%;
+}
+
+.hori-file-rows {
+  font-size: 0.95rem;
+  color: #28a745;
+  font-weight: 600;
+  margin-top: 0.25rem;
+}
+
+.hori-card-error {
+  margin-top: 1rem;
+  color: #dc3545;
+  font-size: 0.9rem;
+  direction: rtl;
+}
+
+.hori-upload-container .spinner {
+  font-size: 1.5rem;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 768px) {
+  .hori-upload-container {
+    padding: 1rem;
+  }
+
+  .hori-upload-card {
+    min-height: 280px;
+    padding: 2rem 1.5rem;
+  }
+}
+
