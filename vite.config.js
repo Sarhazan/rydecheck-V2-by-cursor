@@ -6,6 +6,20 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 3001,
-    strictPort: false // אם הפורט תפוס, Vite יבחר אוטומטית פורט פנוי
+    strictPort: false
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'react-vendor': ['react', 'react-dom'],
+          'framer-motion': ['framer-motion'],
+          'lucide-react': ['lucide-react'],
+          'xlsx': ['xlsx'],
+          'papaparse': ['papaparse'],
+        }
+      }
+    },
+    chunkSizeWarningLimit: 1000
   }
 })
