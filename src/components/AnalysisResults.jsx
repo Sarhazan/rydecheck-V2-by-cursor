@@ -247,28 +247,46 @@ export default function AnalysisResults({ matchResults, employeeMap }) {
           <div className="text-sm text-gray-600">תואמים</div>
           <div className="text-2xl font-bold text-green-600">{summary.matched}</div>
         </div>
-        <div className="bg-yellow-50 p-4 rounded-lg shadow">
-          <div className="text-sm text-gray-600">הפרש מחיר</div>
-          <div className="text-2xl font-bold text-yellow-600">{summary.priceDiff}</div>
-        </div>
+        {selectedSupplier !== 'gett' && (
+          <div className="bg-yellow-50 p-4 rounded-lg shadow">
+            <div className="text-sm text-gray-600">הפרש מחיר</div>
+            <div className="text-2xl font-bold text-yellow-600">{summary.priceDiff}</div>
+          </div>
+        )}
         <div className="bg-red-50 p-4 rounded-lg shadow">
           <div className="text-sm text-gray-600">חסר ברייד</div>
           <div className="text-2xl font-bold text-red-600">{summary.missingInRide || 0}</div>
         </div>
-        <div className="bg-orange-50 p-4 rounded-lg shadow">
-          <div className="text-sm text-gray-600">קיים ברייד חסר אצל הספק</div>
-          <div className="text-2xl font-bold text-orange-600">{summary.missingInSupplier || 0}</div>
-        </div>
-        <div className="bg-blue-50 p-4 rounded-lg shadow">
-          <div className="text-sm text-gray-600">סכום הפרשי מחיר</div>
-          <div className="text-2xl font-bold text-blue-600">
-            ₪{summary.totalPriceDiff.toFixed(2)}
-          </div>
-        </div>
-        {selectedSupplier === 'gett' && (
+        {selectedSupplier === 'gett' ? (
           <div className="bg-purple-50 p-4 rounded-lg shadow">
             <div className="text-sm text-gray-600">בוצע על ידי ספק אחר</div>
             <div className="text-2xl font-bold text-purple-600">{summary.performedByOtherSupplier || 0}</div>
+          </div>
+        ) : (
+          <div className="bg-orange-50 p-4 rounded-lg shadow">
+            <div className="text-sm text-gray-600">קיים ברייד חסר אצל הספק</div>
+            <div className="text-2xl font-bold text-orange-600">{summary.missingInSupplier || 0}</div>
+          </div>
+        )}
+        {selectedSupplier === 'gett' ? (
+          <>
+            <div className="bg-blue-50 p-4 rounded-lg shadow">
+              <div className="text-sm text-gray-600">סכום הפרשי מחיר</div>
+              <div className="text-2xl font-bold text-blue-600">
+                ₪{summary.totalPriceDiff.toFixed(2)}
+              </div>
+            </div>
+            <div className="bg-orange-50 p-4 rounded-lg shadow">
+              <div className="text-sm text-gray-600">קיים ברייד חסר אצל הספק</div>
+              <div className="text-2xl font-bold text-orange-600">{summary.missingInSupplier || 0}</div>
+            </div>
+          </>
+        ) : (
+          <div className="bg-blue-50 p-4 rounded-lg shadow">
+            <div className="text-sm text-gray-600">סכום הפרשי מחיר</div>
+            <div className="text-2xl font-bold text-blue-600">
+              ₪{summary.totalPriceDiff.toFixed(2)}
+            </div>
           </div>
         )}
       </div>
