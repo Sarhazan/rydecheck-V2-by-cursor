@@ -641,7 +641,16 @@ const AnalysisResults = memo(function AnalysisResults({ matchResults, employeeMa
                           {match.supplierData && match.supplierData.price ? `₪${match.supplierData.price.toFixed(2)}` : '-'}
                         </td>
                         <td className="px-4 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">
-                          {match.priceDifference !== null && match.ride !== null ? `₪${match.priceDifference.toFixed(2)}` : '-'}
+                          {(() => {
+                            // #region agent log
+                            const priceDiff = match.priceDifference;
+                            const hasRide = match.ride !== null;
+                            const supplier = match.supplier;
+                            const status = match.status;
+                            fetch('http://127.0.0.1:7244/ingest/88fe1828-0a24-49e8-a296-17448f3fb217',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'AnalysisResults.jsx:644',message:'Displaying price difference',data:{priceDiff,hasRide,supplier,status,ridePrice:match.ride?.price,supplierPrice:match.supplierData?.price},timestamp:Date.now(),sessionId:'debug-session',runId:'initial',hypothesisId:'D'})}).catch(()=>{});
+                            // #endregion
+                            return priceDiff !== null && hasRide ? `₪${priceDiff.toFixed(2)}` : '-';
+                          })()}
                         </td>
                         <td className="px-4 py-4 whitespace-nowrap">
                           <motion.span 

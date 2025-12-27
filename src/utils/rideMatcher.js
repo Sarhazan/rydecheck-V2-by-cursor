@@ -799,6 +799,10 @@ function checkRideMatch(gettRide, ride, parseDateTime, hasCommonPassenger, norma
  * קריטריונים: הפרש זמן ≤ 30 דקות, מקור/יעד זהה, לפחות נוסע אחד זהה
  */
 export function matchGettToRides(gettData, rides, employeeMap = null) {
+  // #region agent log
+  console.log('[DEBUG] matchGettToRides called', { gettDataCount: gettData?.length || 0, ridesCount: rides?.length || 0 });
+  fetch('http://127.0.0.1:7244/ingest/88fe1828-0a24-49e8-a296-17448f3fb217',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'rideMatcher.js:801',message:'matchGettToRides called',data:{gettDataCount:gettData?.length||0,ridesCount:rides?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'initial',hypothesisId:'C'})}).catch(()=>{});
+  // #endregion
   
   const matches = [];
   const matchedRideIds = new Set();
@@ -990,12 +994,31 @@ export function matchGettToRides(gettData, rides, employeeMap = null) {
         // אם הנסיעה לא שייכת לגט, זה אומר שגט הגיש את הנסיעה אבל ברייד היא מופיעה תחת ספק אחר
         const status = belongsToGett ? 'matched' : 'performed_by_other_supplier';
         
+        // חישוב הפרש מחיר (כמו בספקים אחרים)
+        // #region agent log
+        const ridePrice = matchedRide.price || 0;
+        const gettPrice = gett.price || 0;
+        const priceDiff = Math.abs(ridePrice - gettPrice);
+        const hasPriceDifference = priceDiff > 0.01; // יותר מ-1 אגורה
+        console.log('[DEBUG] Get price diff:', { ridePrice, gettPrice, priceDiff, hasPriceDifference, status, belongsToGett });
+        fetch('http://127.0.0.1:7244/ingest/88fe1828-0a24-49e8-a296-17448f3fb217',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'rideMatcher.js:996',message:'Get price difference calculation',data:{ridePrice,gettPrice,priceDiff,hasPriceDifference,status,belongsToGett},timestamp:Date.now(),sessionId:'debug-session',runId:'initial',hypothesisId:'A'})}).catch(()=>{});
+        // #endregion
+        
+        // אם יש הפרש מחיר משמעותי, נשנה את הסטטוס
+        const finalStatus = belongsToGett 
+          ? (hasPriceDifference ? 'price_difference' : 'matched')
+          : 'performed_by_other_supplier';
+        
+        // #region agent log
+        fetch('http://127.0.0.1:7244/ingest/88fe1828-0a24-49e8-a296-17448f3fb217',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'rideMatcher.js:1007',message:'Get match result',data:{finalStatus,priceDiff,originalStatus:status},timestamp:Date.now(),sessionId:'debug-session',runId:'initial',hypothesisId:'B'})}).catch(()=>{});
+        // #endregion
+        
       matches.push({
         supplier: 'gett',
         supplierData: gett,
           ride: matchedRide,
-          status: status,
-        priceDifference: 0,
+          status: finalStatus,
+        priceDifference: priceDiff,
         matchConfidence: 1.0
       });
         matchedRideIds.add(matchedRide.rideId);
@@ -1047,6 +1070,12 @@ export function matchGettToRides(gettData, rides, employeeMap = null) {
   
   const totalMatched = matches.filter(m => m.status === 'matched').length;
   const totalMissingInRide = matches.filter(m => m.status === 'missing_in_ride').length;
+  const totalPriceDiff = matches.filter(m => m.status === 'price_difference').length;
+  
+  // #region agent log
+  const sampleMatch = matches.find(m => m.supplier === 'gett' && m.ride && m.supplierData);
+  fetch('http://127.0.0.1:7244/ingest/88fe1828-0a24-49e8-a296-17448f3fb217',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'rideMatcher.js:1052',message:'matchGettToRides returning',data:{totalMatches:matches.length,totalMatched,totalPriceDiff,sampleMatch:sampleMatch?{status:sampleMatch.status,priceDiff:sampleMatch.priceDifference,ridePrice:sampleMatch.ride?.price,supplierPrice:sampleMatch.supplierData?.price}:null},timestamp:Date.now(),sessionId:'debug-session',runId:'initial',hypothesisId:'E'})}).catch(()=>{});
+  // #endregion
   
   return matches;
 }

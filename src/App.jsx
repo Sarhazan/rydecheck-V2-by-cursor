@@ -151,6 +151,11 @@ function App() {
       };
 
       const matches = matchAllSuppliers(suppliersData, parsedData.rides, parsedData.employeeMap);
+      // #region agent log
+      const gettMatches = matches.gett || [];
+      const sampleGettMatch = gettMatches.find(m => m.ride && m.supplierData);
+      fetch('http://127.0.0.1:7244/ingest/88fe1828-0a24-49e8-a296-17448f3fb217',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.jsx:153',message:'matchAllSuppliers result',data:{gettMatchesCount:gettMatches.length,sampleMatch:sampleGettMatch?{status:sampleGettMatch.status,priceDiff:sampleGettMatch.priceDifference,ridePrice:sampleGettMatch.ride?.price,supplierPrice:sampleGettMatch.supplierData?.price}:null},timestamp:Date.now(),sessionId:'debug-session',runId:'initial',hypothesisId:'F'})}).catch(()=>{});
+      // #endregion
       setMatchResults(matches);
 
       const deptData = calculateDepartmentBreakdown(parsedData.rides, parsedData.employeeMap);
