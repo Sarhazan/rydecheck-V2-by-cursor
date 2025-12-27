@@ -1,12 +1,28 @@
+// React
 import { useState, useCallback, memo } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronDown, ChevronUp, Building2, DollarSign, TrendingUp } from 'lucide-react';
 
-const DepartmentBreakdown = memo(function DepartmentBreakdown({ departmentData }) {
+// Framer Motion
+import { motion, AnimatePresence } from 'framer-motion';
+
+// Icons
+import { ChevronDown, ChevronUp, Building2, DollarSign, TrendingUp, RefreshCw } from 'lucide-react';
+
+const DepartmentBreakdown = memo(function DepartmentBreakdown({ departmentData, employeeMap, onUpdateDepartmentData }) {
   const [expandedDepartment, setExpandedDepartment] = useState(null);
+  const [employeeDepartmentAssignments, setEmployeeDepartmentAssignments] = useState(new Map());
 
   const toggleExpand = useCallback((dept) => {
     setExpandedDepartment(prev => prev === dept ? null : dept);
+  }, []);
+  
+  const handleDepartmentChange = useCallback((employeeId, newDepartment, rideId) => {
+    setEmployeeDepartmentAssignments(prev => {
+      const newMap = new Map(prev);
+      // אם employeeId הוא null, זה אומר שזה שיוך של הנסיעה כולה (ללא PIDs)
+      const key = employeeId === null ? `ride-${rideId}` : `${rideId}-${employeeId}`;
+      newMap.set(key, newDepartment);
+      return newMap;
+    });
   }, []);
 
   if (!departmentData || !departmentData.totals || departmentData.totals.length === 0) {
@@ -22,6 +38,12 @@ const DepartmentBreakdown = memo(function DepartmentBreakdown({ departmentData }
   }
 
   const totalAmount = departmentData.totals.reduce((sum, d) => sum + d.total, 0);
+  
+  // קבלת רשימת כל המחלקות (למעט "ללא מחלקה")
+  const allDepartments = departmentData.totals
+    .filter(d => d.department !== 'ללא מחלקה')
+    .map(d => d.department)
+    .sort();
 
   const cardVariants = {
     hidden: { opacity: 0, y: 20 },
@@ -129,31 +151,47 @@ const DepartmentBreakdown = memo(function DepartmentBreakdown({ departmentData }
                 departmentData: item.departments.find(d => d.department === dept.department)
               }));
 
+            const isNoDepartment = dept.department === 'ללא מחלקה';
+            
             return (
               <motion.div 
                 key={index} 
-                className="border-2 border-gray-200 rounded-xl overflow-hidden bg-white shadow-soft hover:shadow-lg transition-shadow duration-300"
+                className={`border-2 rounded-xl overflow-hidden shadow-soft hover:shadow-lg transition-shadow duration-300 ${
+                  isNoDepartment 
+                    ? 'border-red-400 bg-gradient-to-br from-red-50 to-red-100' 
+                    : 'border-gray-200 bg-white'
+                }`}
                 initial={{ opacity: 0, x: -20 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: index * 0.05 }}
               >
                 <motion.div
-                  className="bg-gradient-to-r from-gray-50 to-gray-100 p-5 flex justify-between items-center cursor-pointer hover:from-gray-100 hover:to-gray-200 transition-all duration-200"
+                  className={`p-5 flex justify-between items-center cursor-pointer transition-all duration-200 ${
+                    isNoDepartment
+                      ? 'bg-gradient-to-r from-red-100 to-red-200 hover:from-red-200 hover:to-red-300'
+                      : 'bg-gradient-to-r from-gray-50 to-gray-100 hover:from-gray-100 hover:to-gray-200'
+                  }`}
                   onClick={() => toggleExpand(dept.department)}
                   whileHover={{ scale: 1.01 }}
                   whileTap={{ scale: 0.99 }}
                 >
                   <div className="flex-1">
-                    <div className="font-bold text-lg text-gray-900 mb-1">{dept.department}</div>
-                    <div className="text-sm text-gray-600 font-medium">
+                    <div className={`font-bold text-lg mb-1 ${isNoDepartment ? 'text-red-900' : 'text-gray-900'}`}>
+                      {dept.department}
+                    </div>
+                    <div className={`text-sm font-medium ${isNoDepartment ? 'text-red-700' : 'text-gray-600'}`}>
                       {dept.rideCount} נסיעות
                     </div>
                   </div>
                   <div className="text-right ml-4">
-                    <div className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+                    <div className={`text-3xl font-bold ${
+                      isNoDepartment 
+                        ? 'text-red-700' 
+                        : 'bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent'
+                    }`}>
                       ₪{dept.total.toFixed(2)}
                     </div>
-                    <div className="text-sm font-semibold text-gray-500">
+                    <div className={`text-sm font-semibold ${isNoDepartment ? 'text-red-600' : 'text-gray-500'}`}>
                       {((dept.total / totalAmount) * 100).toFixed(1)}%
                     </div>
                   </div>
@@ -192,7 +230,7 @@ const DepartmentBreakdown = memo(function DepartmentBreakdown({ departmentData }
                                   יעד
                                 </th>
                                 <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                                  עובדים
+                                  {isNoDepartment ? 'עובדים / שיוך למחלקה' : 'עובדים'}
                                 </th>
                                 <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">
                                   מחיר כולל
@@ -224,14 +262,65 @@ const DepartmentBreakdown = memo(function DepartmentBreakdown({ departmentData }
                                     {item.ride.destination}
                                   </td>
                                   <td className="px-4 py-3 text-sm text-gray-900">
-                                    {item.departmentData.employees
-                                      .map(emp => `${emp.firstName} ${emp.lastName}`)
-                                      .join(', ')}
+                                    {isNoDepartment ? (
+                                      // עבור "ללא מחלקה" - תמיד מציג dropdown, גם אם אין PIDs
+                                      item.ride.pids && item.ride.pids.length > 0 ? (
+                                        <div className="space-y-2">
+                                          {item.ride.pids.map((pid, pidIdx) => {
+                                            const employee = employeeMap?.get(pid);
+                                            const employeeName = employee 
+                                              ? `${employee.firstName} ${employee.lastName}` 
+                                              : `PID: ${pid}`;
+                                            const assignedDept = employeeDepartmentAssignments.get(`${item.rideId}-${pid}`);
+                                            
+                                            return (
+                                              <div key={pidIdx} className="flex items-center gap-2 flex-wrap">
+                                                <span className="text-xs font-medium">{employeeName}:</span>
+                                                <select
+                                                  value={assignedDept || ''}
+                                                  onChange={(e) => handleDepartmentChange(pid, e.target.value, item.rideId)}
+                                                  className="text-xs border border-gray-300 rounded px-2 py-1 bg-white focus:outline-none focus:ring-2 focus:ring-red-500 min-w-[150px]"
+                                                >
+                                                  <option value="">בחר מחלקה...</option>
+                                                  {allDepartments.map(deptName => (
+                                                    <option key={deptName} value={deptName}>{deptName}</option>
+                                                  ))}
+                                                </select>
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      ) : (
+                                        // אם אין PIDs, מציג dropdown כללי לשיוך הנסיעה למחלקה
+                                        <div className="space-y-2">
+                                          <div className="text-xs text-gray-600 mb-2">
+                                            אין PIDs לנסיעה זו - ניתן לשייך את הנסיעה למחלקה:
+                                          </div>
+                                          <select
+                                            value={employeeDepartmentAssignments.get(`ride-${item.rideId}`) || ''}
+                                            onChange={(e) => handleDepartmentChange(null, e.target.value, item.rideId)}
+                                            className="text-xs border border-gray-300 rounded px-2 py-1 bg-white focus:outline-none focus:ring-2 focus:ring-red-500 min-w-[150px]"
+                                          >
+                                            <option value="">בחר מחלקה...</option>
+                                            {allDepartments.map(deptName => (
+                                              <option key={deptName} value={deptName}>{deptName}</option>
+                                            ))}
+                                          </select>
+                                        </div>
+                                      )
+                                    ) : (
+                                      // עבור מחלקות אחרות - מציג את העובדים
+                                      item.departmentData.employees && item.departmentData.employees.length > 0
+                                        ? item.departmentData.employees
+                                            .map(emp => `${emp.firstName} ${emp.lastName}`)
+                                            .join(', ')
+                                        : '-'
+                                    )}
                                   </td>
                                   <td className="px-4 py-3 text-sm font-semibold text-gray-900">
                                     ₪{item.ride.price.toFixed(2)}
                                   </td>
-                                  <td className="px-4 py-3 text-sm font-bold text-blue-600">
+                                  <td className={`px-4 py-3 text-sm font-bold ${isNoDepartment ? 'text-red-600' : 'text-blue-600'}`}>
                                     ₪{item.departmentData.price.toFixed(2)}
                                   </td>
                                 </motion.tr>
@@ -239,6 +328,24 @@ const DepartmentBreakdown = memo(function DepartmentBreakdown({ departmentData }
                             </tbody>
                           </table>
                         </div>
+                        {isNoDepartment && employeeDepartmentAssignments.size > 0 && (
+                          <div className="mt-4 flex justify-end border-t border-gray-200 pt-4">
+                            <motion.button
+                              onClick={() => {
+                                if (onUpdateDepartmentData) {
+                                  onUpdateDepartmentData(employeeDepartmentAssignments);
+                                  setEmployeeDepartmentAssignments(new Map());
+                                }
+                              }}
+                              className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-red-600 to-red-700 text-white rounded-lg shadow-lg hover:shadow-xl font-semibold transition-all duration-200"
+                              whileHover={{ scale: 1.05 }}
+                              whileTap={{ scale: 0.95 }}
+                            >
+                              <RefreshCw className="w-4 h-4" />
+                              עדכן נתונים
+                            </motion.button>
+                          </div>
+                        )}
                       </div>
                     </motion.div>
                   )}

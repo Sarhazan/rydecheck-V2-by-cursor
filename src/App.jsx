@@ -1,15 +1,25 @@
+// React
 import { useState, useCallback, lazy, Suspense } from 'react';
+
+// Framer Motion
 import { motion, AnimatePresence } from 'framer-motion';
+
+// Components
 import FileUpload from './components/FileUpload';
+
+// Utils
 import { parseFile } from './utils/fileParser';
 import { matchAllSuppliers } from './utils/rideMatcher';
 import { calculateDepartmentBreakdown } from './utils/departmentCalculator';
 import { generateAllDemoData } from './utils/demoDataGenerator';
+
+// Icons
 import { Loader2, FileText, BarChart3, Download, Trash2, Play, AlertCircle } from 'lucide-react';
 
 // Lazy loading for heavy components
 const AnalysisResults = lazy(() => import('./components/AnalysisResults'));
 const DepartmentBreakdown = lazy(() => import('./components/DepartmentBreakdown'));
+const ZeroPriceRides = lazy(() => import('./components/ZeroPriceRides'));
 
 // Lazy loading for excel exporter (only loaded when needed)
 const loadExcelExporter = () => import('./utils/excelExporter');
@@ -151,11 +161,6 @@ function App() {
       };
 
       const matches = matchAllSuppliers(suppliersData, parsedData.rides, parsedData.employeeMap);
-      // #region agent log
-      const gettMatches = matches.gett || [];
-      const sampleGettMatch = gettMatches.find(m => m.ride && m.supplierData);
-      fetch('http://127.0.0.1:7244/ingest/88fe1828-0a24-49e8-a296-17448f3fb217',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.jsx:153',message:'matchAllSuppliers result',data:{gettMatchesCount:gettMatches.length,sampleMatch:sampleGettMatch?{status:sampleGettMatch.status,priceDiff:sampleGettMatch.priceDifference,ridePrice:sampleGettMatch.ride?.price,supplierPrice:sampleGettMatch.supplierData?.price}:null},timestamp:Date.now(),sessionId:'debug-session',runId:'initial',hypothesisId:'F'})}).catch(()=>{});
-      // #endregion
       setMatchResults(matches);
 
       const deptData = calculateDepartmentBreakdown(parsedData.rides, parsedData.employeeMap);
@@ -163,6 +168,81 @@ function App() {
 
     } catch (err) {
       setError(`שגיאה בניתוח: ${err.message}`);
+      console.error(err);
+    } finally {
+      setIsAnalyzing(false);
+    }
+  }, [parsedData]);
+
+  const handleUpdateDepartmentData = useCallback((employeeDepartmentAssignments) => {
+    if (!employeeDepartmentAssignments || employeeDepartmentAssignments.size === 0) {
+      return;
+    }
+
+    try {
+      setIsAnalyzing(true);
+      setError(null);
+
+      // יצירת עותק של employeeMap לעדכון
+      const updatedEmployeeMap = new Map(parsedData.employeeMap);
+      
+      // עדכון המחלקות של העובדים
+      employeeDepartmentAssignments.forEach((department, key) => {
+        if (!department) return;
+        
+        // key יכול להיות `${rideId}-${employeeId}` או `ride-${rideId}`
+        if (key.startsWith('ride-')) {
+          // זה שיוך של נסיעה כולה ללא PIDs - נצטרך למצוא את ה-PIDs מהנסיעה
+          const rideId = parseInt(key.replace('ride-', ''));
+          const ride = parsedData.rides.find(r => r.rideId === rideId);
+          if (ride && ride.pids && ride.pids.length > 0) {
+            // אם יש PIDs, נעדכן אותם
+            ride.pids.forEach(pid => {
+              const employee = updatedEmployeeMap.get(pid);
+              if (employee) {
+                updatedEmployeeMap.set(pid, { ...employee, department });
+              }
+            });
+          }
+        } else {
+          // זה שיוך של עובד ספציפי
+          // המפתח הוא `${rideId}-${employeeId}`
+          const parts = key.split('-');
+          if (parts.length >= 2) {
+            const rideId = parseInt(parts[0]);
+            const employeeId = parseInt(parts[parts.length - 1]);
+            
+            const employee = updatedEmployeeMap.get(employeeId);
+            if (employee) {
+              updatedEmployeeMap.set(employeeId, { ...employee, department });
+            } else {
+              // אם העובד לא קיים, ניצור אותו עם המידע הבסיסי
+              const ride = parsedData.rides.find(r => r.rideId === rideId);
+              if (ride) {
+                updatedEmployeeMap.set(employeeId, {
+                  employeeId: employeeId,
+                  firstName: `PID ${employeeId}`,
+                  lastName: '',
+                  department: department
+                });
+              }
+            }
+          }
+        }
+      });
+
+      // עדכון parsedData עם employeeMap המעודכן
+      setParsedData(prev => ({
+        ...prev,
+        employeeMap: updatedEmployeeMap
+      }));
+
+      // חישוב מחדש של ההתפלגות המחלקתית
+      const deptData = calculateDepartmentBreakdown(parsedData.rides, updatedEmployeeMap);
+      setDepartmentData(deptData);
+
+    } catch (err) {
+      setError(`שגיאה בעדכון נתונים: ${err.message}`);
       console.error(err);
     } finally {
       setIsAnalyzing(false);
@@ -374,6 +454,53 @@ function App() {
             )}
           </AnimatePresence>
 
+          {/* סיכום נתונים - קונטיינר מעוגל בצד שמאל */}
+          {(matchResults || departmentData) && parsedData.rides.length > 0 && (
+            <motion.div
+              className="mb-8 flex justify-start"
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.5, delay: 0.2 }}
+            >
+              <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-2xl shadow-lg p-6 min-w-[300px]">
+                <h3 className="text-lg font-bold text-gray-800 mb-4 text-right">סיכום נתונים</h3>
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm text-gray-600">מספר נסיעות:</div>
+                    <div className="text-2xl font-bold text-blue-700">
+                      {parsedData.rides.length.toLocaleString()}
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm text-gray-600">סכום כולל:</div>
+                    <div className="text-2xl font-bold text-indigo-700">
+                      ₪{parsedData.rides.reduce((sum, ride) => sum + (ride.price || 0), 0).toFixed(2)}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {/* נסיעות לבדיקה - נסיעות עם מחיר אפס */}
+          {(matchResults || departmentData) && parsedData.rides.length > 0 && (
+            <motion.div 
+              className="mb-8"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5 }}
+            >
+              <Suspense fallback={
+                <div className="text-center py-12">
+                  <Loader2 className="w-8 h-8 animate-spin mx-auto text-primary-600" />
+                  <p className="mt-2 text-gray-600">טוען נסיעות לבדיקה...</p>
+                </div>
+              }>
+                <ZeroPriceRides rides={parsedData.rides} employeeMap={parsedData.employeeMap} />
+              </Suspense>
+            </motion.div>
+          )}
+
           {/* תוצאות ניתוח */}
           {matchResults && (
             <motion.div 
@@ -407,7 +534,11 @@ function App() {
                   <p className="mt-2 text-gray-600">טוען חלוקה מחלקתית...</p>
                 </div>
               }>
-                <DepartmentBreakdown departmentData={departmentData} />
+                <DepartmentBreakdown 
+                  departmentData={departmentData} 
+                  employeeMap={parsedData.employeeMap}
+                  onUpdateDepartmentData={handleUpdateDepartmentData}
+                />
               </Suspense>
             </motion.div>
           )}

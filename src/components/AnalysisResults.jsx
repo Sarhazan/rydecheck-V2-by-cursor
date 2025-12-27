@@ -1,6 +1,13 @@
+// React
 import { useState, useMemo, useCallback, memo } from 'react';
+
+// Framer Motion
 import { motion, AnimatePresence } from 'framer-motion';
+
+// Utils
 import { getStatusText } from '../utils/rideMatcher';
+
+// Icons
 import { CheckCircle2, AlertCircle, XCircle, TrendingUp, DollarSign, Users, FileX, ArrowRightLeft } from 'lucide-react';
 
 const AnalysisResults = memo(function AnalysisResults({ matchResults, employeeMap }) {
@@ -107,7 +114,12 @@ const AnalysisResults = memo(function AnalysisResults({ matchResults, employeeMa
     
     let filtered = results;
     if (statusFilter !== 'all') {
-      filtered = results.filter(r => r.status === statusFilter);
+      // עבור גט: פילטר "הפרש מחיר" צריך להציג נסיעות מתואמות שיש להן הפרש מחיר
+      if (selectedSupplier === 'gett' && statusFilter === 'price_difference') {
+        filtered = results.filter(r => r.status === 'matched' && r.priceDifference !== null && r.priceDifference !== undefined && r.priceDifference > 0.01);
+      } else {
+        filtered = results.filter(r => r.status === statusFilter);
+      }
     }
     
     return [...filtered].sort((a, b) => {
@@ -150,7 +162,10 @@ const AnalysisResults = memo(function AnalysisResults({ matchResults, employeeMa
     const totalRides = ridesFromRideFile.length;
     
     const matched = results.filter(r => r.status === 'matched').length;
-    const priceDiff = results.filter(r => r.status === 'price_difference').length;
+    // עבור גט: הפרשי מחיר הם נסיעות מתואמות שיש להן הפרש מחיר (לא סטטוס נפרד)
+    const priceDiff = selectedSupplier === 'gett' 
+      ? results.filter(r => r.status === 'matched' && r.priceDifference !== null && r.priceDifference !== undefined && r.priceDifference > 0.01).length
+      : results.filter(r => r.status === 'price_difference').length;
     const missingInRide = results.filter(r => r.status === 'missing_in_ride').length;
     const missingInSupplier = results.filter(r => r.status === 'missing_in_supplier').length;
     const notMatched = results.filter(r => r.status === 'not_matched').length;
@@ -641,16 +656,7 @@ const AnalysisResults = memo(function AnalysisResults({ matchResults, employeeMa
                           {match.supplierData && match.supplierData.price ? `₪${match.supplierData.price.toFixed(2)}` : '-'}
                         </td>
                         <td className="px-4 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">
-                          {(() => {
-                            // #region agent log
-                            const priceDiff = match.priceDifference;
-                            const hasRide = match.ride !== null;
-                            const supplier = match.supplier;
-                            const status = match.status;
-                            fetch('http://127.0.0.1:7244/ingest/88fe1828-0a24-49e8-a296-17448f3fb217',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'AnalysisResults.jsx:644',message:'Displaying price difference',data:{priceDiff,hasRide,supplier,status,ridePrice:match.ride?.price,supplierPrice:match.supplierData?.price},timestamp:Date.now(),sessionId:'debug-session',runId:'initial',hypothesisId:'D'})}).catch(()=>{});
-                            // #endregion
-                            return priceDiff !== null && hasRide ? `₪${priceDiff.toFixed(2)}` : '-';
-                          })()}
+                          {match.priceDifference !== null && match.ride !== null ? `₪${match.priceDifference.toFixed(2)}` : '-'}
                         </td>
                         <td className="px-4 py-4 whitespace-nowrap">
                           <motion.span 

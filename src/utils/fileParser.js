@@ -1,8 +1,11 @@
+// External libraries
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
 
 /**
- * חילוץ מספרי עובדים (pids) משדה ההיסטוריה
+ * חילוץ מספרי עובדים (PIDs) משדה ההיסטוריה
+ * @param {string} historyField - שדה ההיסטוריה המכיל את ה-PIDs בפורמט |pids=123,456|
+ * @returns {number[]} מערך של מספרי עובדים
  */
 export function extractPids(historyField) {
   if (!historyField) return [];
@@ -20,7 +23,10 @@ export function extractPids(historyField) {
 }
 
 /**
- * פארסינג קובץ רייד
+ * פארסינג קובץ רייד (CSV)
+ * @param {string} data - תוכן הקובץ
+ * @param {string} filename - שם הקובץ
+ * @returns {Promise<Array>} Promise שמחזיר מערך של נסיעות
  */
 export function parseRideFile(data, filename) {
   return new Promise((resolve, reject) => {
@@ -34,8 +40,32 @@ export function parseRideFile(data, filename) {
             // חילוץ pids משני מקומות אפשריים
             const historyPids = extractPids(row.היסטוריה || '');
             const altPids = extractPids(row['תחנות נוסעים חלופיות'] || '');
+            
+            // אם מספר ה-PIDs ב-historyPids תואם למספר הנוסעים בשדה נוסעים,
+            // נשתמש רק ב-historyPids (כי altField יכול להכיל נתונים לא רלוונטיים)
+            const passengersField = row.נוסעים || '';
+            let useOnlyHistoryPids = false;
+            let passengerNames = [];
+            try {
+              passengerNames = passengersField.split(/[;,\n]/).map(p => p.trim()).filter(p => p && p.length > 0);
+              const passengerCount = passengerNames.length;
+              // אם יש historyPids ומספרם תואם למספר הנוסעים, נשתמש רק בהם
+              if (passengerCount > 0 && historyPids.length > 0 && historyPids.length === passengerCount) {
+                useOnlyHistoryPids = true;
+              } else if (passengerCount === 1) {
+                // אם יש רק נוסע אחד, תמיד נשתמש רק ב-historyPids
+                useOnlyHistoryPids = true;
+              }
+            } catch (e) {
+              // אם יש שגיאה בפיצול, נשתמש בשני המקורות
+              useOnlyHistoryPids = false;
+              passengerNames = [];
+            }
+            
             // איחוד pids משני המקומות (ללא כפילויות)
-            const allPids = [...new Set([...historyPids, ...altPids])];
+            const allPids = useOnlyHistoryPids 
+              ? historyPids 
+              : [...new Set([...historyPids, ...altPids])];
             
             const priceRaw = row.מחיר || '';
             const price = parseFloat(priceRaw);
@@ -64,7 +94,9 @@ export function parseRideFile(data, filename) {
 }
 
 /**
- * פארסינג קובץ מסד עובדים
+ * פארסינג קובץ מסד עובדים (CSV)
+ * @param {string} data - תוכן הקובץ
+ * @returns {Promise<Object>} Promise שמחזיר אובייקט עם employees ו-employeeMap
  */
 export function parseEmployeesFile(data) {
   return new Promise((resolve, reject) => {
@@ -100,6 +132,9 @@ export function parseEmployeesFile(data) {
 
 /**
  * מציאת עמודה לפי שמות אפשריים
+ * @param {Object} row - שורה מהקובץ
+ * @param {string[]} possibleNames - רשימת שמות אפשריים לעמודה
+ * @returns {*} ערך העמודה שנמצאה או null
  */
 function findColumn(row, possibleNames) {
   if (!row) return null;
@@ -144,7 +179,9 @@ function findColumn(row, possibleNames) {
 
 /**
  * מציאת עמודת מחיר אוטומטית לפי תוכן (אם לא נמצא שם)
- * מחזירה את מפתח העמודה (key) ולא את הערך
+ * @param {Object} row - שורה מהקובץ
+ * @param {Array} allRows - כל השורות מהקובץ
+ * @returns {string|null} מפתח העמודה (key) שנמצאה או null
  */
 function findPriceColumnAuto(row, allRows) {
   if (!row || !allRows || allRows.length === 0) return null;
@@ -200,6 +237,9 @@ function findPriceColumnAuto(row, allRows) {
 
 /**
  * פארסינג קובץ Excel (בון תור, חורי, גט)
+ * @param {File} file - קובץ Excel
+ * @param {string} supplierType - סוג הספק ('bontour', 'hori', 'gett')
+ * @returns {Promise<Array>} Promise שמחזיר מערך של נסיעות מהספק
  */
 export function parseExcelFile(file, supplierType) {
   return new Promise((resolve, reject) => {
@@ -496,6 +536,9 @@ export function parseExcelFile(file, supplierType) {
 
 /**
  * פארסינג קובץ כללי (CSV או Excel)
+ * @param {File} file - קובץ לטעינה
+ * @param {string} fileType - סוג הקובץ ('ride', 'employees', 'bontour', 'hori', 'gett')
+ * @returns {Promise<Array|Object>} Promise שמחזיר את הנתונים המפורסים
  */
 export async function parseFile(file, fileType) {
   if (file.name.endsWith('.csv')) {

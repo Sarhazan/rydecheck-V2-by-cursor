@@ -1,5 +1,7 @@
 /**
  * נרמול שמות מקומות להשוואה
+ * @param {string} location - שם המקום
+ * @returns {string} שם מקום מנורמל
  */
 function normalizeLocation(location) {
   if (!location) return '';
@@ -11,7 +13,12 @@ function normalizeLocation(location) {
 }
 
 /**
- * חישוב הפרש זמן בדקות
+ * חישוב הפרש זמן בדקות בין שני תאריכים/זמנים
+ * @param {string} date1 - תאריך ראשון
+ * @param {string} time1 - זמן ראשון
+ * @param {string} date2 - תאריך שני
+ * @param {string} time2 - זמן שני
+ * @returns {number} הפרש בדקות או Infinity אם יש שגיאה
  */
 function getTimeDifferenceInMinutes(date1, time1, date2, time2) {
   try {
@@ -65,7 +72,11 @@ function getTimeDifferenceInMinutes(date1, time1, date2, time2) {
 }
 
 /**
- * בדיקה אם יש נוסע משותף
+ * בדיקה אם יש נוסע משותף בין נסיעת רייד לנסיעת גט
+ * @param {number[]} ridePids - מערך של PIDs מנסיעת רייד
+ * @param {string} gettPassengersStr - מחרוזת נוסעים מנסיעת גט
+ * @param {Map} employeeMap - מפה של עובדים
+ * @returns {boolean} true אם יש נוסע משותף
  */
 function hasCommonPassenger(ridePids, gettPassengersStr, employeeMap) {
   if (!ridePids || ridePids.length === 0) return false;
@@ -198,6 +209,9 @@ function hasCommonPassenger(ridePids, gettPassengersStr, employeeMap) {
 /**
  * התאמת בון תור עם רייד
  * לוגיקה: רק ID ומחיר - אם מתאים = matched
+ * @param {Array} bontourData - מערך של נסיעות בון תור
+ * @param {Array} rides - מערך של נסיעות רייד
+ * @returns {Array} מערך של התאמות
  */
 export function matchBontourToRides(bontourData, rides) {
   const matches = [];
@@ -275,6 +289,9 @@ export function matchBontourToRides(bontourData, rides) {
 /**
  * התאמת חורי עם רייד
  * לוגיקה: רק ID ומחיר - אם מתאים = matched
+ * @param {Array} horiData - מערך של נסיעות חורי
+ * @param {Array} rides - מערך של נסיעות רייד
+ * @returns {Array} מערך של התאמות
  */
 export function matchHoriToRides(horiData, rides) {
   const matches = [];
@@ -797,12 +814,12 @@ function checkRideMatch(gettRide, ride, parseDateTime, hasCommonPassenger, norma
  * התאמת גט עם רייד (התאמה חכמה לפי חודש)
  * לוגיקה: התאמה מקבילית מתחילת כל חודש - נסיעה 1 של גט עם נסיעה 1 של רייד, וכו'
  * קריטריונים: הפרש זמן ≤ 30 דקות, מקור/יעד זהה, לפחות נוסע אחד זהה
+ * @param {Array} gettData - מערך של נסיעות גט
+ * @param {Array} rides - מערך של נסיעות רייד
+ * @param {Map|null} employeeMap - מפה של עובדים (אופציונלי)
+ * @returns {Array} מערך של התאמות
  */
 export function matchGettToRides(gettData, rides, employeeMap = null) {
-  // #region agent log
-  console.log('[DEBUG] matchGettToRides called', { gettDataCount: gettData?.length || 0, ridesCount: rides?.length || 0 });
-  fetch('http://127.0.0.1:7244/ingest/88fe1828-0a24-49e8-a296-17448f3fb217',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'rideMatcher.js:801',message:'matchGettToRides called',data:{gettDataCount:gettData?.length||0,ridesCount:rides?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'initial',hypothesisId:'C'})}).catch(()=>{});
-  // #endregion
   
   const matches = [];
   const matchedRideIds = new Set();
@@ -992,33 +1009,20 @@ export function matchGettToRides(gettData, rides, employeeMap = null) {
         });
         
         // אם הנסיעה לא שייכת לגט, זה אומר שגט הגיש את הנסיעה אבל ברייד היא מופיעה תחת ספק אחר
+        // שלב 1: התאמה - הסטטוס נקבע רק לפי התאמה, לא לפי מחיר
         const status = belongsToGett ? 'matched' : 'performed_by_other_supplier';
         
-        // חישוב הפרש מחיר (כמו בספקים אחרים)
-        // #region agent log
+        // שלב 2: חישוב הפרש מחיר (מידע נוסף, לא משנה את הסטטוס)
         const ridePrice = matchedRide.price || 0;
         const gettPrice = gett.price || 0;
         const priceDiff = Math.abs(ridePrice - gettPrice);
-        const hasPriceDifference = priceDiff > 0.01; // יותר מ-1 אגורה
-        console.log('[DEBUG] Get price diff:', { ridePrice, gettPrice, priceDiff, hasPriceDifference, status, belongsToGett });
-        fetch('http://127.0.0.1:7244/ingest/88fe1828-0a24-49e8-a296-17448f3fb217',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'rideMatcher.js:996',message:'Get price difference calculation',data:{ridePrice,gettPrice,priceDiff,hasPriceDifference,status,belongsToGett},timestamp:Date.now(),sessionId:'debug-session',runId:'initial',hypothesisId:'A'})}).catch(()=>{});
-        // #endregion
-        
-        // אם יש הפרש מחיר משמעותי, נשנה את הסטטוס
-        const finalStatus = belongsToGett 
-          ? (hasPriceDifference ? 'price_difference' : 'matched')
-          : 'performed_by_other_supplier';
-        
-        // #region agent log
-        fetch('http://127.0.0.1:7244/ingest/88fe1828-0a24-49e8-a296-17448f3fb217',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'rideMatcher.js:1007',message:'Get match result',data:{finalStatus,priceDiff,originalStatus:status},timestamp:Date.now(),sessionId:'debug-session',runId:'initial',hypothesisId:'B'})}).catch(()=>{});
-        // #endregion
         
       matches.push({
         supplier: 'gett',
         supplierData: gett,
           ride: matchedRide,
-          status: finalStatus,
-        priceDifference: priceDiff,
+          status: status, // נשאר 'matched' גם אם יש הפרש מחיר
+        priceDifference: priceDiff, // הפרש המחיר הוא מידע נוסף
         matchConfidence: 1.0
       });
         matchedRideIds.add(matchedRide.rideId);
@@ -1070,18 +1074,16 @@ export function matchGettToRides(gettData, rides, employeeMap = null) {
   
   const totalMatched = matches.filter(m => m.status === 'matched').length;
   const totalMissingInRide = matches.filter(m => m.status === 'missing_in_ride').length;
-  const totalPriceDiff = matches.filter(m => m.status === 'price_difference').length;
-  
-  // #region agent log
-  const sampleMatch = matches.find(m => m.supplier === 'gett' && m.ride && m.supplierData);
-  fetch('http://127.0.0.1:7244/ingest/88fe1828-0a24-49e8-a296-17448f3fb217',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'rideMatcher.js:1052',message:'matchGettToRides returning',data:{totalMatches:matches.length,totalMatched,totalPriceDiff,sampleMatch:sampleMatch?{status:sampleMatch.status,priceDiff:sampleMatch.priceDifference,ridePrice:sampleMatch.ride?.price,supplierPrice:sampleMatch.supplierData?.price}:null},timestamp:Date.now(),sessionId:'debug-session',runId:'initial',hypothesisId:'E'})}).catch(()=>{});
-  // #endregion
   
   return matches;
 }
 
 /**
  * פונקציה כללית להתאמת כל הספקים
+ * @param {Object} suppliersData - אובייקט עם נתוני ספקים (bontour, hori, gett)
+ * @param {Array} rides - מערך של נסיעות רייד
+ * @param {Map|null} employeeMap - מפה של עובדים (אופציונלי)
+ * @returns {Object} אובייקט עם תוצאות התאמה לכל ספק
  */
 export function matchAllSuppliers(suppliersData, rides, employeeMap = null) {
   const results = {
@@ -1108,7 +1110,9 @@ export function matchAllSuppliers(suppliersData, rides, employeeMap = null) {
 }
 
 /**
- * קבלת סטטוס טקסטואלי
+ * קבלת סטטוס טקסטואלי בעברית
+ * @param {string} status - סטטוס באנגלית
+ * @returns {string} סטטוס בעברית
  */
 export function getStatusText(status) {
   const statusMap = {

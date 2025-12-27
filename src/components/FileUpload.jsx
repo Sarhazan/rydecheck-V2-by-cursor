@@ -1,5 +1,10 @@
+// React
 import { useState, useRef, useCallback, memo } from 'react';
+
+// Framer Motion
 import { motion, AnimatePresence } from 'framer-motion';
+
+// Icons
 import { Upload, CheckCircle2, X } from 'lucide-react';
 
 const FileUpload = memo(function FileUpload({ fileType, label, onFileUpload, currentFile }) {
