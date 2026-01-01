@@ -1,5 +1,6 @@
 // React
 import { useState, useRef, useCallback, memo } from 'react';
+import PropTypes from 'prop-types';
 
 // Framer Motion
 import { motion, AnimatePresence } from 'framer-motion';
@@ -7,7 +8,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 // Icons
 import { Upload, CheckCircle2, X } from 'lucide-react';
 
-const FileUpload = memo(function FileUpload({ fileType, label, onFileUpload, currentFile }) {
+const FileUpload = memo(function FileUpload({ fileType, label, onFileUpload, currentFile, itemCount }) {
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef(null);
   const dragCounter = useRef(0);
@@ -145,6 +146,11 @@ const FileUpload = memo(function FileUpload({ fileType, label, onFileUpload, cur
             <div className="text-xs text-gray-500">
               {formatFileSize(currentFile.size)}
             </div>
+            {itemCount !== undefined && itemCount !== null && itemCount > 0 && (fileType === 'ride' || fileType === 'bontour' || fileType === 'hori' || fileType === 'gett') && (
+              <div className="text-xs text-blue-600 font-medium">
+                {itemCount} נסיעות נטענו
+              </div>
+            )}
               <button
                 className="inline-flex items-center gap-1 text-xs text-red-600 hover:text-red-800 mt-2 transition-colors"
                 onClick={handleRemove}
@@ -178,5 +184,18 @@ const FileUpload = memo(function FileUpload({ fileType, label, onFileUpload, cur
     </div>
   );
 });
+
+FileUpload.propTypes = {
+  fileType: PropTypes.oneOf(['ride', 'bontour', 'hori', 'gett', 'employees']).isRequired,
+  label: PropTypes.string.isRequired,
+  onFileUpload: PropTypes.func.isRequired,
+  currentFile: PropTypes.object,
+  itemCount: PropTypes.number
+};
+
+FileUpload.defaultProps = {
+  currentFile: null,
+  itemCount: 0
+};
 
 export default FileUpload;

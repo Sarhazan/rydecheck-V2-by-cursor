@@ -95,59 +95,78 @@ export async function exportDepartmentReports(departmentBreakdown) {
 /**
  * ייצוא דוח כללי של כל ההתאמות
  */
-export function exportAnalysisReport(matchResults) {
+export function exportAnalysisReport(matchResults, rideNotes = new Map()) {
   const allReports = [];
   
   // בון תור
   if (matchResults.bontour && matchResults.bontour.length > 0) {
-    const bontourData = matchResults.bontour.map(match => ({
-      'ספק': 'בון תור',
-      'קוד נסיעה רייד': match.ride ? match.ride.rideId : '',
-      'מספר הזמנה': match.supplierData ? match.supplierData.orderNumber : '',
-      'תאריך': match.ride ? match.ride.date : (match.supplierData ? match.supplierData.date : ''),
-      'מקור': match.ride ? match.ride.source : '',
-      'יעד': match.ride ? match.ride.destination : '',
-      'מחיר רייד': match.ride ? (typeof match.ride.price === 'number' ? match.ride.price.toFixed(2) : match.ride.price) : '',
-      'מחיר ספק': match.supplierData ? (typeof match.supplierData.price === 'number' ? match.supplierData.price.toFixed(2) : match.supplierData.price) : '',
-      'הפרש מחיר': match.priceDifference ? (typeof match.priceDifference === 'number' ? match.priceDifference.toFixed(2) : match.priceDifference) : '',
-      'סטטוס': match.status
-    }));
+    const bontourData = matchResults.bontour.map(match => {
+      const rideId = match.ride ? match.ride.rideId : null;
+      const note = rideId && rideNotes.has(rideId) ? rideNotes.get(rideId) : '';
+      return {
+        'ספק': 'בון תור',
+        'קוד נסיעה רייד': match.ride ? match.ride.rideId : '',
+        'מספר הזמנה': match.supplierData ? match.supplierData.orderNumber : '',
+        'תאריך': match.ride ? match.ride.date : (match.supplierData ? match.supplierData.date : ''),
+        'מקור': match.ride ? match.ride.source : '',
+        'יעד': match.ride ? match.ride.destination : '',
+        'מחיר רייד': match.ride ? (typeof match.ride.price === 'number' ? match.ride.price.toFixed(2) : match.ride.price) : '',
+        'מחיר ספק': match.supplierData ? (typeof match.supplierData.price === 'number' ? match.supplierData.price.toFixed(2) : match.supplierData.price) : '',
+        'הפרש מחיר': match.priceDifference ? (typeof match.priceDifference === 'number' ? match.priceDifference.toFixed(2) : match.priceDifference) : '',
+        'הערות': note,
+        'סטטוס': match.status,
+        'נוסף ידנית': match.ride && match.ride.isManual ? `כן - מספר הזמנה: ${match.ride.supplierOrderNumber || ''}` : ''
+      };
+    });
     allReports.push(...bontourData);
   }
   
   // חורי
   if (matchResults.hori && matchResults.hori.length > 0) {
-    const horiData = matchResults.hori.map(match => ({
-      'ספק': 'חורי',
-      'קוד נסיעה רייד': match.ride ? match.ride.rideId : '',
-      'מספר נסיעה': match.supplierData ? match.supplierData.tripNumber : '',
-      'תאריך': match.ride ? match.ride.date : (match.supplierData ? match.supplierData.date : ''),
-      'מקור': match.ride ? match.ride.source : '',
-      'יעד': match.ride ? match.ride.destination : '',
-      'מחיר רייד': match.ride ? (typeof match.ride.price === 'number' ? match.ride.price.toFixed(2) : match.ride.price) : '',
-      'מחיר ספק': match.supplierData ? (typeof match.supplierData.price === 'number' ? match.supplierData.price.toFixed(2) : match.supplierData.price) : '',
-      'הפרש מחיר': match.priceDifference ? (typeof match.priceDifference === 'number' ? match.priceDifference.toFixed(2) : match.priceDifference) : '',
-      'סטטוס': match.status
-    }));
+    const horiData = matchResults.hori.map(match => {
+      const rideId = match.ride ? match.ride.rideId : null;
+      const note = rideId && rideNotes.has(rideId) ? rideNotes.get(rideId) : '';
+      return {
+        'ספק': 'חורי',
+        'קוד נסיעה רייד': match.ride ? match.ride.rideId : '',
+        'מספר נסיעה': match.supplierData ? match.supplierData.tripNumber : '',
+        'תאריך': match.ride ? match.ride.date : (match.supplierData ? match.supplierData.date : ''),
+        'מקור': match.ride ? match.ride.source : '',
+        'יעד': match.ride ? match.ride.destination : '',
+        'מחיר רייד': match.ride ? (typeof match.ride.price === 'number' ? match.ride.price.toFixed(2) : match.ride.price) : '',
+        'מחיר ספק': match.supplierData ? (typeof match.supplierData.price === 'number' ? match.supplierData.price.toFixed(2) : match.supplierData.price) : '',
+        'הפרש מחיר': match.priceDifference ? (typeof match.priceDifference === 'number' ? match.priceDifference.toFixed(2) : match.priceDifference) : '',
+        'הערות': note,
+        'סטטוס': match.status,
+        'נוסף ידנית': match.ride && match.ride.isManual ? `כן - מספר הזמנה: ${match.ride.supplierOrderNumber || ''}` : ''
+      };
+    });
     allReports.push(...horiData);
   }
   
   // גט
   if (matchResults.gett && matchResults.gett.length > 0) {
-    const gettData = matchResults.gett.map(match => ({
-      'ספק': 'גט',
-      'קוד נסיעה רייד': match.ride ? match.ride.rideId : '',
-      'מקור גט': match.supplierData ? match.supplierData.source : '',
-      'יעד גט': match.supplierData ? match.supplierData.destination : '',
-      'תאריך': match.ride ? match.ride.date : (match.supplierData ? match.supplierData.date : ''),
-      'מקור רייד': match.ride ? match.ride.source : '',
-      'יעד רייד': match.ride ? match.ride.destination : '',
-      'מחיר רייד': match.ride ? (typeof match.ride.price === 'number' ? match.ride.price.toFixed(2) : match.ride.price) : '',
-      'מחיר ספק': match.supplierData ? (typeof match.supplierData.price === 'number' ? match.supplierData.price.toFixed(2) : match.supplierData.price) : '',
-      'הפרש מחיר': match.priceDifference ? (typeof match.priceDifference === 'number' ? match.priceDifference.toFixed(2) : match.priceDifference) : '',
-      'סטטוס': match.status,
-      'ביטחון התאמה': match.matchConfidence ? (match.matchConfidence * 100).toFixed(1) + '%' : ''
-    }));
+    const gettData = matchResults.gett.map(match => {
+      const rideId = match.ride ? match.ride.rideId : null;
+      const note = rideId && rideNotes.has(rideId) ? rideNotes.get(rideId) : '';
+      return {
+        'ספק': 'גט',
+        'קוד נסיעה רייד': match.ride ? match.ride.rideId : '',
+        'מספר הזמנה': match.supplierData ? match.supplierData.orderNumber : '',
+        'מקור גט': match.supplierData ? match.supplierData.source : '',
+        'יעד גט': match.supplierData ? match.supplierData.destination : '',
+        'תאריך': match.ride ? match.ride.date : (match.supplierData ? match.supplierData.date : ''),
+        'מקור רייד': match.ride ? match.ride.source : '',
+        'יעד רייד': match.ride ? match.ride.destination : '',
+        'מחיר רייד': match.ride ? (typeof match.ride.price === 'number' ? match.ride.price.toFixed(2) : match.ride.price) : '',
+        'מחיר ספק': match.supplierData ? (typeof match.supplierData.price === 'number' ? match.supplierData.price.toFixed(2) : match.supplierData.price) : '',
+        'הפרש מחיר': match.priceDifference ? (typeof match.priceDifference === 'number' ? match.priceDifference.toFixed(2) : match.priceDifference) : '',
+        'הערות': note,
+        'סטטוס': match.status,
+        'ביטחון התאמה': match.matchConfidence ? (match.matchConfidence * 100).toFixed(1) + '%' : '',
+        'נוסף ידנית': match.ride && match.ride.isManual ? `כן - מספר הזמנה: ${match.ride.supplierOrderNumber || ''}` : ''
+      };
+    });
     allReports.push(...gettData);
   }
   

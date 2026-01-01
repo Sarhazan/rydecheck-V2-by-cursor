@@ -28,3 +28,21 @@ dist-ssr
 .env.local
 .env.production
 .env.development
+
+# Sample data files
+*.xlsx
+*.csv
+!backend/**/*.csv
+!backend/**/*.xlsx
+
+# Cursor debug logs
+.cursor/debug.log
+
+# Sample/test data
+**/*sample*.xlsx
+**/*sample*.csv
+**/*test*.xlsx
+**/*test*.csv
+
+# Legacy/unused frontend project
+backend/frontend/

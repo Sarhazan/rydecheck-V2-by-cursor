@@ -46,28 +46,6 @@ def match_gett():
         try:
             match_result = matcher.match_gett_trips(company_filtered, gett_normalized)
         except Exception as e:
-            import traceback, json, os
-            from datetime import datetime
-            backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            workspace_root = os.path.dirname(backend_dir)
-            debug_log_path = os.path.join(workspace_root, '.cursor', 'debug.log')
-            os.makedirs(os.path.dirname(debug_log_path), exist_ok=True)
-            with open(debug_log_path, 'a', encoding='utf-8') as f:
-                f.write(json.dumps({
-                    'timestamp': str(datetime.now()),
-                    'location': 'routes/gett.py:match_gett',
-                    'message': 'match_gett_trips exception',
-                    'data': {
-                        'error': str(e),
-                        'traceback': traceback.format_exc(),
-                        'company_count': len(company_filtered),
-                        'gett_count': len(gett_normalized)
-                    },
-                    'sessionId': 'debug-session',
-                    'runId': 'post-fix',
-                    'hypothesisId': 'H2'
-                }, ensure_ascii=False) + '\n')
-                f.flush()
             return jsonify({'error': str(e)}), 500
         
         # Convert to JSON-serializable format
@@ -111,29 +89,6 @@ def match_gett():
         )
         
     except Exception as e:
-        import traceback, json, os
-        from datetime import datetime
-        backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        workspace_root = os.path.dirname(backend_dir)
-        debug_log_path = os.path.join(workspace_root, '.cursor', 'debug.log')
-        os.makedirs(os.path.dirname(debug_log_path), exist_ok=True)
-        try:
-            with open(debug_log_path, 'a', encoding='utf-8') as f:
-                f.write(json.dumps({
-                    'timestamp': str(datetime.now()),
-                    'location': 'routes/gett.py:match_gett outer',
-                    'message': 'match_gett exception',
-                    'data': {
-                        'error': str(e),
-                        'traceback': traceback.format_exc()
-                    },
-                    'sessionId': 'debug-session',
-                    'runId': 'post-fix',
-                    'hypothesisId': 'H3'
-                }, ensure_ascii=False) + '\n')
-                f.flush()
-        except Exception:
-            pass
         return jsonify({'error': str(e)}), 500
 
 
@@ -185,26 +140,6 @@ def ride_gett_columns():
             'row_count': len(rows)
         })
     except Exception as e:
-        import traceback, json, os
-        from datetime import datetime
-        backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        workspace_root = os.path.dirname(backend_dir)
-        debug_log_path = os.path.join(workspace_root, '.cursor', 'debug.log')
-        os.makedirs(os.path.dirname(debug_log_path), exist_ok=True)
-        with open(debug_log_path, 'a', encoding='utf-8') as f:
-            f.write(json.dumps({
-                'timestamp': str(datetime.now()),
-                'location': 'routes/gett.py:ride_gett_columns',
-                'message': 'ride_gett_columns exception',
-                'data': {
-                    'error': str(e),
-                    'traceback': traceback.format_exc()
-                },
-                'sessionId': 'debug-session',
-                'runId': 'post-fix',
-                'hypothesisId': 'H-ride-cols'
-            }, ensure_ascii=False) + '\n')
-            f.flush()
         return jsonify({'error': str(e)}), 500
 
 
@@ -265,26 +200,6 @@ def gett_next():
             'company_trip': make_serializable(company_match)
         })
     except Exception as e:
-        import traceback, json, os
-        from datetime import datetime
-        backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        workspace_root = os.path.dirname(backend_dir)
-        debug_log_path = os.path.join(workspace_root, '.cursor', 'debug.log')
-        os.makedirs(os.path.dirname(debug_log_path), exist_ok=True)
-        with open(debug_log_path, 'a', encoding='utf-8') as f:
-            f.write(json.dumps({
-                'timestamp': str(datetime.now()),
-                'location': 'routes/gett.py:gett_next',
-                'message': 'gett_next exception',
-                'data': {
-                    'error': str(e),
-                    'traceback': traceback.format_exc()
-                },
-                'sessionId': 'debug-session',
-                'runId': 'post-fix',
-                'hypothesisId': 'H-next'
-            }, ensure_ascii=False) + '\n')
-            f.flush()
         return jsonify({'error': str(e)}), 500
 
 
@@ -369,26 +284,6 @@ def gett_confirm():
             'next_pair': next_pair
         })
     except Exception as e:
-        import traceback, json, os
-        from datetime import datetime
-        backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        workspace_root = os.path.dirname(backend_dir)
-        debug_log_path = os.path.join(workspace_root, '.cursor', 'debug.log')
-        os.makedirs(os.path.dirname(debug_log_path), exist_ok=True)
-        with open(debug_log_path, 'a', encoding='utf-8') as f:
-            f.write(json.dumps({
-                'timestamp': str(datetime.now()),
-                'location': 'routes/gett.py:gett_confirm',
-                'message': 'gett_confirm exception',
-                'data': {
-                    'error': str(e),
-                    'traceback': traceback.format_exc()
-                },
-                'sessionId': 'debug-session',
-                'runId': 'post-fix',
-                'hypothesisId': 'H-confirm'
-            }, ensure_ascii=False) + '\n')
-            f.flush()
         return jsonify({'error': str(e)}), 500
 @api.route('/gett-columns', methods=['POST'])
 def get_gett_columns():
@@ -400,56 +295,9 @@ def get_gett_columns():
         return jsonify({'error': 'Filename is required'}), 400
     
     try:
-        # #region agent log
-        import os, json
-        from datetime import datetime
-        backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        workspace_root = os.path.dirname(backend_dir)
-        debug_log_path = os.path.join(workspace_root, '.cursor', 'debug.log')
-        os.makedirs(os.path.dirname(debug_log_path), exist_ok=True)
-        try:
-            with open(debug_log_path, 'a', encoding='utf-8') as f:
-                log_entry = {
-                    'timestamp': str(datetime.now()),
-                    'location': 'routes/gett.py:98',
-                    'message': 'gett-columns: Starting',
-                    'data': {
-                        'filename': filename,
-                        'GETT_HEADER_ROW': GETT_HEADER_ROW
-                    },
-                    'sessionId': 'debug-session',
-                    'runId': 'run3',
-                    'hypothesisId': 'J'
-                }
-                f.write(json.dumps(log_entry, ensure_ascii=False) + '\n')
-                f.flush()
-        except Exception:
-            pass
-        # #endregion
-        
         # Read GETT file: read ALL rows without header first to avoid stopping at empty rows
         # Avoid nrows limit so we capture rows 16-641
         df_all = pd.read_excel(filename, header=None, engine='openpyxl')
-        
-        # #region agent log
-        try:
-            with open(debug_log_path, 'a', encoding='utf-8') as f:
-                log_entry = {
-                    'timestamp': str(datetime.now()),
-                    'location': 'routes/gett.py:120',
-                    'message': 'gett-columns: After read all rows',
-                    'data': {
-                        'total_row_count': len(df_all)
-                    },
-                    'sessionId': 'debug-session',
-                    'runId': 'run3',
-                    'hypothesisId': 'K'
-                }
-                f.write(json.dumps(log_entry, ensure_ascii=False) + '\n')
-                f.flush()
-        except Exception:
-            pass
-        # #endregion
         
         # Extract header row (row 15 in Excel = index 14 in 0-indexed)
         if len(df_all) > GETT_HEADER_ROW:
@@ -458,50 +306,8 @@ def get_gett_columns():
             df = df_all.iloc[GETT_HEADER_ROW + 1:].copy()
             df.columns = header_row
             df = df.reset_index(drop=True)
-            
-            # #region agent log
-            try:
-                with open(debug_log_path, 'a', encoding='utf-8') as f:
-                    log_entry = {
-                        'timestamp': str(datetime.now()),
-                        'location': 'routes/gett.py:135',
-                        'message': 'gett-columns: After extract header and data',
-                        'data': {
-                            'df_all_count': len(df_all),
-                            'df_count_after_header': len(df),
-                            'header_row_sample': [str(x)[:30] if x else None for x in header_row[:5]]
-                        },
-                        'sessionId': 'debug-session',
-                        'runId': 'run3',
-                        'hypothesisId': 'N'
-                    }
-                    f.write(json.dumps(log_entry, ensure_ascii=False) + '\n')
-                    f.flush()
-            except Exception:
-                pass
-            # #endregion
         else:
             return jsonify({'error': 'File does not contain expected header row'}), 400
-        
-        # #region agent log
-        try:
-            with open(debug_log_path, 'a', encoding='utf-8') as f:
-                log_entry = {
-                    'timestamp': str(datetime.now()),
-                    'location': 'routes/gett.py:130',
-                    'message': 'gett-columns: After skip first row',
-                    'data': {
-                        'row_count': len(df)
-                    },
-                    'sessionId': 'debug-session',
-                    'runId': 'run3',
-                    'hypothesisId': 'L'
-                }
-                f.write(json.dumps(log_entry, ensure_ascii=False) + '\n')
-                f.flush()
-        except Exception:
-            pass
-        # #endregion
         
         # For GETT, only drop rows where column D (מס' הזמנה, index 3) is NaN
         if len(df) > 0:
@@ -510,27 +316,6 @@ def get_gett_columns():
                 df = df[df[col_d_name].notna()].reset_index(drop=True)
             else:
                 df = df.dropna(how='all')
-        
-        # #region agent log
-        try:
-            with open(debug_log_path, 'a', encoding='utf-8') as f:
-                log_entry = {
-                    'timestamp': str(datetime.now()),
-                    'location': 'routes/gett.py:145',
-                    'message': 'gett-columns: After filter column D',
-                    'data': {
-                        'row_count': len(df),
-                        'col_d_name': col_d_name if 'col_d_name' in locals() else None
-                    },
-                    'sessionId': 'debug-session',
-                    'runId': 'run3',
-                    'hypothesisId': 'M'
-                }
-                f.write(json.dumps(log_entry, ensure_ascii=False) + '\n')
-                f.flush()
-        except Exception:
-            pass
-        # #endregion
         
         # Get columns by index: B=1, D=3, G=6, H=7, K=10, L=11
         column_indices = [

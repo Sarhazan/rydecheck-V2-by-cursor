@@ -21,7 +21,7 @@ npm install
 npm run dev
 ```
 
-המערכת תרוץ על `http://localhost:3000`
+המערכת תרוץ על `http://localhost:5173` (או פורט אחר אם 5173 תפוס)
 
 ## מבנה הקבצים
 
@@ -68,6 +68,42 @@ npm run dev
 - SheetJS (xlsx)
 - PapaParse
 - JSZip
+- Framer Motion
+- PropTypes
+
+## מבנה הקוד
+
+```
+src/
+├── components/          # קומפוננטות React
+│   ├── common/         # קומפוננטות משותפות (ErrorBoundary, LoadingSpinner)
+│   └── AnalysisResults/ # קומפוננטות ניתוח תוצאות + hooks
+├── hooks/              # Custom React hooks (useAnalysis, useFileUpload)
+├── contexts/           # React Contexts לניהול state (מוכן לשימוש עתידי)
+├── utils/              # פונקציות עזר
+│   ├── matching/       # פונקציות התאמה (מוכן לשימוש עתידי)
+│   ├── formatters/     # פונקציות עיצוב (מוכן לשימוש עתידי)
+│   └── validators/     # פונקציות ולידציה (מוכן לשימוש עתידי)
+└── types/              # הגדרות טיפוסים (מוכן לשימוש עתידי)
+```
+
+## פיתוח
+
+### Linting ו-Formatting
+
+```bash
+# בדיקת שגיאות ESLint
+npm run lint
+
+# תיקון שגיאות ESLint אוטומטית
+npm run lint:fix
+
+# עיצוב קוד עם Prettier
+npm run format
+
+# בדיקת עיצוב קוד
+npm run format:check
+```
 
 ## רישיון
 

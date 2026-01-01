@@ -1,6 +1,7 @@
 // External libraries
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
+import { GETT_EMPTY_COLUMN_MAPPING, GETT_COLUMN_NAMES } from './gettConstants.js';
 
 /**
  * חילוץ מספרי עובדים (PIDs) משדה ההיסטוריה
@@ -23,73 +24,221 @@ export function extractPids(historyField) {
 }
 
 /**
- * פארסינג קובץ רייד (CSV)
+ * עיבוד נתוני נסיעות לאחר פרסינג
+ */
+function processRidesData(data, resolve) {
+  const rides = data.map((row, index) => {
+    // ניקוי מקפים מהכותרות - אם הכותרות מכילות מקפים, נסיר אותם
+    const cleanRow = {};
+    Object.keys(row).forEach(key => {
+      const cleanKey = String(key).replace(/^["']|["']$/g, '').trim();
+      let value = row[key];
+      // אם הערך הוא מחרוזת עם מקפים, נסיר אותם
+      if (typeof value === 'string') {
+        value = value.replace(/^["']|["']$/g, '').trim();
+      }
+      cleanRow[cleanKey] = value;
+    });
+    
+    // חילוץ pids משני מקומות אפשריים
+    const historyPids = extractPids(cleanRow.היסטוריה || '');
+    const altPids = extractPids(cleanRow['תחנות נוסעים חלופיות'] || '');
+    
+    // אם מספר ה-PIDs ב-historyPids תואם למספר הנוסעים בשדה נוסעים,
+    // נשתמש רק ב-historyPids (כי altField יכול להכיל נתונים לא רלוונטיים)
+    const passengersField = cleanRow.נוסעים || '';
+    let useOnlyHistoryPids = false;
+    let passengerNames = [];
+    try {
+      passengerNames = passengersField.split(/[;,\n]/).map(p => p.trim()).filter(p => p && p.length > 0);
+      const passengerCount = passengerNames.length;
+      // אם יש historyPids ומספרם תואם למספר הנוסעים, נשתמש רק בהם
+      if (passengerCount > 0 && historyPids.length > 0 && historyPids.length === passengerCount) {
+        useOnlyHistoryPids = true;
+      } else if (passengerCount === 1) {
+        // אם יש רק נוסע אחד, תמיד נשתמש רק ב-historyPids
+        useOnlyHistoryPids = true;
+      }
+    } catch (e) {
+      // אם יש שגיאה בפיצול, נשתמש בשני המקורות
+      useOnlyHistoryPids = false;
+      passengerNames = [];
+    }
+    
+    // איחוד pids משני המקומות (ללא כפילויות)
+    const allPids = useOnlyHistoryPids 
+      ? historyPids 
+      : [...new Set([...historyPids, ...altPids])];
+    
+    // חילוץ מחיר - ננסה כמה אפשרויות
+    let priceRaw = cleanRow.מחיר || '';
+    // אם לא נמצא, ננסה למצוא את המפתח "מחיר" (בדיוק, לא "מחיר חלקים")
+    if (!priceRaw) {
+      const priceKey = Object.keys(cleanRow).find(k => {
+        const trimmed = k.trim();
+        return trimmed === 'מחיר' || (trimmed.includes('מחיר') && !trimmed.includes('חלקים') && !trimmed.includes('קוד'));
+      });
+      if (priceKey) {
+        priceRaw = cleanRow[priceKey] || '';
+      }
+    }
+    const price = parseFloat(priceRaw);
+    
+    // חילוץ rideId - ננסה כמה אפשרויות
+    let rideId = null;
+    if (cleanRow._ID) {
+      rideId = parseInt(String(cleanRow._ID).replace(/[^0-9]/g, ''));
+    } else {
+      // ננסה למצוא את המפתח _ID במפתחות שונים
+      const idKey = Object.keys(cleanRow).find(k => k.trim() === '_ID' || k.trim().includes('_ID'));
+      if (idKey) {
+        rideId = parseInt(String(cleanRow[idKey]).replace(/[^0-9]/g, ''));
+      }
+    }
+    
+    // חילוץ תאריך ושעה - אם יש שדה נפרד לשעה, נשתמש בו
+    let dateValue = cleanRow.תאריך || '';
+    let timeValue = cleanRow.שעה || cleanRow.time || cleanRow.Time || cleanRow.זמן || '';
+    
+    // אם התאריך כולל כבר שעה (יש רווח), נשאיר אותו כמו שהוא
+    // אם יש שדה נפרד לשעה, נצרף אותו לתאריך
+    if (dateValue && timeValue && !dateValue.includes(' ')) {
+      dateValue = `${dateValue} ${timeValue}`;
+    }
+    
+    const rideData = {
+      rideId: isNaN(rideId) ? null : rideId,
+      date: dateValue,
+      passengers: cleanRow.נוסעים || '',
+      pids: allPids,
+      source: cleanRow.מוצא || '',
+      destination: cleanRow.יעד || '',
+      price: isNaN(price) ? 0 : price,
+      supplier: cleanRow.ספק || '',
+      rawData: cleanRow
+    };
+    
+    return rideData;
+  });
+  
+  const filteredRides = rides.filter(ride => {
+    return ride.rideId !== null;
+  });
+  
+  resolve(filteredRides);
+}
+
+/**
+ * פארסינג ידני של שורת CSV
+ * מטפל במירכאות ובתווים מיוחדים
+ */
+function parseCSVLine(line, delimiter) {
+  const values = [];
+  let currentValue = '';
+  let insideQuotes = false;
+  
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    const nextChar = i < line.length - 1 ? line[i + 1] : '';
+    
+    if (char === '"') {
+      if (insideQuotes && nextChar === '"') {
+        // מירכאות כפולות - מירכא אחת בתוך מירכאות
+        currentValue += '"';
+        i++; // דילוג על המירכא הבאה
+      } else {
+        // התחלה/סיום של מירכאות
+        insideQuotes = !insideQuotes;
+      }
+    } else if (char === delimiter && !insideQuotes) {
+      // מפריד מחוץ למירכאות
+      values.push(currentValue.trim());
+      currentValue = '';
+    } else {
+      currentValue += char;
+    }
+  }
+  
+  // הוספת הערך האחרון
+  values.push(currentValue.trim());
+  
+  return values;
+}
+
+/**
+ * פארסינג קובץ רייד (CSV) - פרסור ידני
  * @param {string} data - תוכן הקובץ
  * @param {string} filename - שם הקובץ
  * @returns {Promise<Array>} Promise שמחזיר מערך של נסיעות
  */
 export function parseRideFile(data, filename) {
   return new Promise((resolve, reject) => {
-    Papa.parse(data, {
-      header: true,
-      skipEmptyLines: true,
-      encoding: 'UTF-8',
-      complete: (results) => {
-        try {
-          const rides = results.data.map(row => {
-            // חילוץ pids משני מקומות אפשריים
-            const historyPids = extractPids(row.היסטוריה || '');
-            const altPids = extractPids(row['תחנות נוסעים חלופיות'] || '');
-            
-            // אם מספר ה-PIDs ב-historyPids תואם למספר הנוסעים בשדה נוסעים,
-            // נשתמש רק ב-historyPids (כי altField יכול להכיל נתונים לא רלוונטיים)
-            const passengersField = row.נוסעים || '';
-            let useOnlyHistoryPids = false;
-            let passengerNames = [];
-            try {
-              passengerNames = passengersField.split(/[;,\n]/).map(p => p.trim()).filter(p => p && p.length > 0);
-              const passengerCount = passengerNames.length;
-              // אם יש historyPids ומספרם תואם למספר הנוסעים, נשתמש רק בהם
-              if (passengerCount > 0 && historyPids.length > 0 && historyPids.length === passengerCount) {
-                useOnlyHistoryPids = true;
-              } else if (passengerCount === 1) {
-                // אם יש רק נוסע אחד, תמיד נשתמש רק ב-historyPids
-                useOnlyHistoryPids = true;
-              }
-            } catch (e) {
-              // אם יש שגיאה בפיצול, נשתמש בשני המקורות
-              useOnlyHistoryPids = false;
-              passengerNames = [];
-            }
-            
-            // איחוד pids משני המקומות (ללא כפילויות)
-            const allPids = useOnlyHistoryPids 
-              ? historyPids 
-              : [...new Set([...historyPids, ...altPids])];
-            
-            const priceRaw = row.מחיר || '';
-            const price = parseFloat(priceRaw);
-            
-            return {
-              rideId: row._ID ? parseInt(row._ID) : null,
-              date: row.תאריך || '',
-              passengers: row.נוסעים || '',
-              pids: allPids,
-              source: row.מוצא || '',
-              destination: row.יעד || '',
-              price: isNaN(price) ? 0 : price,
-              supplier: row.ספק || '',
-              rawData: row
-            };
-          }).filter(ride => ride.rideId !== null);
-          
-          resolve(rides);
-        } catch (error) {
-          reject(error);
+    try {
+      // 1. פיצול לשורות
+      const lines = data.split(/\r?\n/).filter(line => line.trim().length > 0);
+      
+      if (lines.length === 0) {
+        resolve([]);
+        return;
+      }
+      
+      // 2. זיהוי delimiter - בדיקת השורה הראשונה
+      let delimiter = ',';
+      const firstLine = lines[0];
+      const pipeCount = (firstLine.match(/\|/g) || []).length;
+      const commaCount = (firstLine.match(/,/g) || []).length;
+      
+      // אם יש יותר pipes מ-commas, נשתמש ב-pipe
+      if (pipeCount > commaCount) {
+        delimiter = '|';
+      }
+      
+      // 3. חיפוש שורת כותרות (השורה שמכילה _ID)
+      let headerRowIndex = -1;
+      let headers = [];
+      
+      for (let i = 0; i < Math.min(10, lines.length); i++) {
+        const line = lines[i];
+        const values = parseCSVLine(line, delimiter);
+        const firstValue = values[0] || '';
+        const cleanFirstValue = firstValue.replace(/^["']|["']$/g, '').trim();
+        
+        if (cleanFirstValue === '_ID' || cleanFirstValue === '"_ID"' || cleanFirstValue.includes('_ID')) {
+          headerRowIndex = i;
+          headers = values.map(h => h.replace(/^["']|["']$/g, '').trim());
+          break;
         }
-      },
-      error: (error) => reject(error)
-    });
+      }
+      
+      if (headerRowIndex === -1 || headers.length === 0) {
+        // לא מצאנו שורת כותרות - ננסה להשתמש בשורה הראשונה
+        headerRowIndex = 0;
+        headers = parseCSVLine(lines[0], delimiter).map(h => h.replace(/^["']|["']$/g, '').trim());
+      }
+      
+      // 4. פרסור כל שורה ידנית
+      const dataRows = [];
+      for (let i = headerRowIndex + 1; i < lines.length; i++) {
+        const line = lines[i];
+        const values = parseCSVLine(line, delimiter);
+        
+        // ניקוי מקפים מהערכים
+        const cleanedValues = values.map(v => v.replace(/^["']|["']$/g, '').trim());
+        
+        // יצירת אובייקט עם כל העמודות
+        const row = {};
+        headers.forEach((header, index) => {
+          row[header] = cleanedValues[index] || '';
+        });
+        
+        dataRows.push(row);
+      }
+      
+      // 5. עיבוד הנתונים
+      processRidesData(dataRows, resolve);
+    } catch (error) {
+      reject(error);
+    }
   });
 }
 
@@ -175,6 +324,163 @@ function findColumn(row, possibleNames) {
   }
   
   return null;
+}
+
+/**
+ * פרסור מחיר ממחרוזת או מספר
+ * מטפל במספרים, מחרוזות עם תווים מיוחדים (₪, פסיקים, רווחים)
+ * @param {number|string|null|undefined} priceValue - ערך המחיר לפרסור
+ * @returns {number} מחיר כמספר, או 0 אם לא ניתן לפרסר
+ */
+function parsePrice(priceValue) {
+  if (priceValue === null || priceValue === undefined || priceValue === '') {
+    return 0;
+  }
+  
+  if (typeof priceValue === 'number') {
+    return priceValue;
+  }
+  
+  // הסרת תווים מיותרים (₪, פסיקים, רווחים)
+  const cleanPrice = String(priceValue).replace(/[₪,\s]/g, '').trim();
+  const parsed = parseFloat(cleanPrice);
+  return isNaN(parsed) ? 0 : parsed;
+}
+
+/**
+ * חילוץ מספר הזמנה משורת גט
+ * @param {Object} row - שורה מהקובץ
+ * @returns {string|null} מספר הזמנה או null
+ */
+function extractGettOrderNumber(row) {
+  let orderNumberStr = null;
+  const emptyKey = `__EMPTY_${GETT_EMPTY_COLUMN_MAPPING.ORDER_NUMBER}`;
+  if (row.hasOwnProperty(emptyKey)) {
+    orderNumberStr = String(row[emptyKey] || '').trim();
+  }
+  // נסה גם לחלץ מספר מהמחרוזת אם יש
+  return orderNumberStr ? (orderNumberStr.match(/\d+/)?.[0] || orderNumberStr) : null;
+}
+
+/**
+ * חילוץ תאריך ושעה משורת גט
+ * @param {Object} row - שורה מהקובץ
+ * @param {Function} findColumn - פונקציה למציאת עמודה
+ * @returns {Object} אובייקט עם date ו-time
+ */
+function extractGettDateTime(row, findColumn) {
+  let dateStr = findColumn(row, GETT_COLUMN_NAMES.DATE);
+  let timeStr = findColumn(row, GETT_COLUMN_NAMES.TIME);
+  
+  // אם לא נמצא לפי שם, נשתמש במיקום לפי __EMPTY
+  const emptyKey = GETT_EMPTY_COLUMN_MAPPING.DATE_TIME === 0 ? '__EMPTY' : `__EMPTY_${GETT_EMPTY_COLUMN_MAPPING.DATE_TIME}`;
+  if (!dateStr && row.hasOwnProperty(emptyKey)) {
+    // תאריך ושעה ביחד - פורמט: "2025-11-29 21:00"
+    const dateTimeStr = String(row[emptyKey] || '').trim();
+    if (dateTimeStr) {
+      const parts = dateTimeStr.split(/\s+/);
+      if (parts.length >= 2) {
+        dateStr = parts[0] || '';
+        timeStr = parts.slice(1).join(' ') || '';
+      } else {
+        dateStr = dateTimeStr;
+      }
+    }
+  }
+  
+  return { date: dateStr || '', time: timeStr || '' };
+}
+
+/**
+ * חילוץ מקור ויעד משורת גט
+ * @param {Object} row - שורה מהקובץ
+ * @param {Function} findColumn - פונקציה למציאת עמודה
+ * @returns {Object} אובייקט עם source ו-destination
+ */
+function extractGettLocations(row, findColumn) {
+  let sourceStr = findColumn(row, GETT_COLUMN_NAMES.SOURCE);
+  let destStr = findColumn(row, GETT_COLUMN_NAMES.DESTINATION);
+  
+  // אם לא נמצא לפי שם, נשתמש במיקום לפי __EMPTY
+  const sourceEmptyKey = `__EMPTY_${GETT_EMPTY_COLUMN_MAPPING.SOURCE}`;
+  if (!sourceStr && row.hasOwnProperty(sourceEmptyKey)) {
+    sourceStr = String(row[sourceEmptyKey] || '').trim();
+  }
+  const destEmptyKey = `__EMPTY_${GETT_EMPTY_COLUMN_MAPPING.DESTINATION}`;
+  if (!destStr && row.hasOwnProperty(destEmptyKey)) {
+    destStr = String(row[destEmptyKey] || '').trim();
+  }
+  
+  return { source: sourceStr || '', destination: destStr || '' };
+}
+
+/**
+ * חילוץ נוסעים משורת גט
+ * @param {Object} row - שורה מהקובץ
+ * @param {Function} findColumn - פונקציה למציאת עמודה
+ * @returns {string} מחרוזת נוסעים
+ */
+function extractGettPassengers(row, findColumn) {
+  let passengersStr = findColumn(row, GETT_COLUMN_NAMES.PASSENGERS);
+  
+  // אם לא נמצא לפי שם, נשתמש במיקום לפי __EMPTY
+  const passengersEmptyKey = `__EMPTY_${GETT_EMPTY_COLUMN_MAPPING.PASSENGERS}`;
+  if (!passengersStr && row.hasOwnProperty(passengersEmptyKey)) {
+    passengersStr = String(row[passengersEmptyKey] || '').trim();
+  }
+  
+  return passengersStr || '';
+}
+
+/**
+ * פרסור שורת גט
+ * @param {Object} row - שורה מהקובץ
+ * @param {number} index - אינדקס השורה
+ * @param {string|null} autoPriceColumnKey - מפתח עמודת מחיר אוטומטית
+ * @param {Function} findColumn - פונקציה למציאת עמודה
+ * @returns {Object} אובייקט עם נתוני הנסיעה
+ */
+function parseGettRow(row, index, autoPriceColumnKey, findColumn) {
+  // חילוץ מספר הזמנה
+  const orderNumber = extractGettOrderNumber(row);
+  
+  // חילוץ תאריך ושעה
+  const { date: dateStr, time: timeStr } = extractGettDateTime(row, findColumn);
+  
+  // חילוץ מקור ויעד
+  const { source: sourceStr, destination: destStr } = extractGettLocations(row, findColumn);
+  
+  // חילוץ נוסעים
+  const passengersStr = extractGettPassengers(row, findColumn);
+  
+  // חילוץ מחיר
+  let priceValue = findColumn(row, GETT_COLUMN_NAMES.PRICE);
+  
+  // אם לא נמצא לפי שם, נשתמש במיקום לפי __EMPTY
+  const priceEmptyKey = `__EMPTY_${GETT_EMPTY_COLUMN_MAPPING.PRICE}`;
+  if (!priceValue && row.hasOwnProperty(priceEmptyKey)) {
+    priceValue = String(row[priceEmptyKey] || '').trim();
+  }
+  
+  // אם לא נמצא ונמצא עמודה אוטומטית, נשתמש בה
+  if ((!priceValue || priceValue === 0 || priceValue === '') && autoPriceColumnKey && row[autoPriceColumnKey] !== undefined) {
+    priceValue = row[autoPriceColumnKey];
+  }
+  
+  // טיפול במחיר - שימוש בפונקציה משותפת
+  const price = parsePrice(priceValue);
+  
+  return {
+    date: dateStr,
+    time: timeStr,
+    source: sourceStr,
+    destination: destStr,
+    passengers: passengersStr,
+    price: price,
+    orderNumber: orderNumber,
+    rawData: row,
+    index: index
+  };
 }
 
 /**
@@ -279,8 +585,49 @@ export function parseExcelFile(file, supplierType) {
             });
             return obj;
           });
+        } else if (supplierType === 'hori') {
+          // חורי: ייתכן שיש שורת כותרת בשורה 0, אז נזהה את שורת הכותרות
+          // קודם כל נקרא את כל הנתונים כ-array כדי לזהות את שורת הכותרות
+          const allData = XLSX.utils.sheet_to_json(worksheet, { 
+            defval: '',
+            raw: false,
+            header: 1 // קורא לפי מערך (array) במקום לפי header
+          });
+          
+          // נחפש את שורת הכותרות - השורה שמכילה "מספר ויזה" או "תאריך"
+          let headerRowIndex = 0;
+          for (let i = 0; i < Math.min(5, allData.length); i++) {
+            const rowStr = allData[i].join(' ').toLowerCase();
+            if (rowStr.includes('מספר ויזה') || rowStr.includes('תאריך')) {
+              headerRowIndex = i;
+              break;
+            }
+          }
+          
+          // אם מצאנו שורת כותרות שלא בשורה 0, נמיר את הנתונים ידנית
+          if (headerRowIndex >= 0 && headerRowIndex < allData.length) {
+            const headers = allData[headerRowIndex];
+            const dataRows = allData.slice(headerRowIndex + 1);
+            
+            // המרה למערך של אובייקטים
+            parsedData = dataRows.map(row => {
+              const obj = {};
+              headers.forEach((header, index) => {
+                if (header) {
+                  obj[header] = row[index] !== undefined ? row[index] : '';
+                }
+              });
+              return obj;
+            });
+          } else {
+            // אם לא מצאנו שורת כותרות, נמיר כרגיל
+            parsedData = XLSX.utils.sheet_to_json(worksheet, { 
+              defval: '',
+              raw: false 
+            });
+          }
         } else {
-          // המרה ל-JSON רגיל
+          // המרה ל-JSON רגיל (בון תור וכו')
           const jsonData = XLSX.utils.sheet_to_json(worksheet, { 
             defval: '',
             raw: false 
@@ -292,7 +639,11 @@ export function parseExcelFile(file, supplierType) {
         let autoPriceColumnKey = null;
         if (parsedData.length > 0) {
           const firstRow = parsedData[0];
-          const priceValue = findColumn(firstRow, ['מחיר', 'סכום', 'price', 'amount', 'total', 'מחיר כולל', 'סך הכל', 'מחיר סופי', 'סה"כ']);
+          // עבור חורי, עדיפות ל-"סה"כ ללקוח-לפני מע"מ"
+          const priceColumnNames = supplierType === 'hori' 
+            ? ['סה"כ ללקוח-לפני מע"מ', 'מחיר', 'סכום', 'price', 'amount', 'total', 'מחיר כולל', 'סך הכל', 'מחיר סופי', 'סה"כ']
+            : ['מחיר', 'סכום', 'price', 'amount', 'total', 'מחיר כולל', 'סך הכל', 'מחיר סופי', 'סה"כ'];
+          const priceValue = findColumn(firstRow, priceColumnNames);
           if (!priceValue || priceValue === 0 || priceValue === '') {
             autoPriceColumnKey = findPriceColumnAuto(firstRow, parsedData);
           }
@@ -345,18 +696,8 @@ export function parseExcelFile(file, supplierType) {
             }
             
             
-            // טיפול במחיר - יכול להיות מספר או מחרוזת
-            let price = 0;
-            if (priceValue !== null && priceValue !== undefined && priceValue !== '') {
-              if (typeof priceValue === 'number') {
-                price = priceValue;
-              } else {
-                // הסרת תווים מיותרים (₪, פסיקים, רווחים)
-                const cleanPrice = String(priceValue).replace(/[₪,\s]/g, '').trim();
-                const parsed = parseFloat(cleanPrice);
-                price = isNaN(parsed) ? 0 : parsed;
-              }
-            }
+            // טיפול במחיר - שימוש בפונקציה משותפת
+            const price = parsePrice(priceValue);
             
             return {
               orderNumber: orderNumber ? (typeof orderNumber === 'number' ? orderNumber : parseInt(String(orderNumber).replace(/[^0-9]/g, ''))) : null,
@@ -369,8 +710,9 @@ export function parseExcelFile(file, supplierType) {
               index: index
             };
           } else if (supplierType === 'hori') {
-            const tripNumber = findColumn(row, ['מספר נסיעה', 'מספר נסיעה ', 'trip number', 'מספר', 'מספר הזמנה']);
-            let priceValue = findColumn(row, ['מחיר', 'סכום', 'price', 'amount', 'total', 'מחיר כולל', 'סך הכל', 'מחיר סופי', 'סה"כ', 'מחיר לתשלום']);
+            const tripNumber = findColumn(row, ['מספר נסיעה', 'מספר נסיעה ', 'trip number', 'מספר', 'מספר הזמנה', 'מספר ויזה']);
+            // עדיפות ל-"סה"כ ללקוח-לפני מע"מ" עבור חורי (חודש 09.25)
+            let priceValue = findColumn(row, ['סה"כ ללקוח-לפני מע"מ', 'מחיר', 'סכום', 'price', 'amount', 'total', 'מחיר כולל', 'סך הכל', 'מחיר סופי', 'סה"כ', 'מחיר לתשלום']);
             
             // אם לא נמצא ונמצא עמודה אוטומטית, נשתמש בה
             if ((!priceValue || priceValue === 0 || priceValue === '') && autoPriceColumnKey && row[autoPriceColumnKey] !== undefined) {
@@ -379,18 +721,8 @@ export function parseExcelFile(file, supplierType) {
             
             const dateStr = findColumn(row, ['תאריך', 'date', 'תאריך נסיעה']);
             
-            // טיפול במחיר - יכול להיות מספר או מחרוזת
-            let price = 0;
-            if (priceValue !== null && priceValue !== undefined && priceValue !== '') {
-              if (typeof priceValue === 'number') {
-                price = priceValue;
-              } else {
-                // הסרת תווים מיותרים (₪, פסיקים, רווחים)
-                const cleanPrice = String(priceValue).replace(/[₪,\s]/g, '').trim();
-                const parsed = parseFloat(cleanPrice);
-                price = isNaN(parsed) ? 0 : parsed;
-              }
-            }
+            // טיפול במחיר - שימוש בפונקציה משותפת
+            const price = parsePrice(priceValue);
             
             return {
               tripNumber: tripNumber ? (typeof tripNumber === 'number' ? tripNumber : parseInt(String(tripNumber).replace(/[^0-9]/g, ''))) : null,
@@ -400,89 +732,8 @@ export function parseExcelFile(file, supplierType) {
               index: index
             };
           } else if (supplierType === 'gett') {
-            // גט - חיפוש לפי מיקום או לפי שם עמודה
-            // אם יש __EMPTY, זה אומר שאין header row, אז נשתמש במיקום העמודות
-            let dateStr = findColumn(row, ['תאריך', 'date', 'Date', 'תאריך נסיעה']);
-            let timeStr = findColumn(row, ['שעה', 'time', 'Time', 'זמן']);
-            let sourceStr = findColumn(row, ['מקור', 'מאת', 'from', 'From', 'מקום התחלה']);
-            let destStr = findColumn(row, ['יעד', 'אל', 'to', 'To', 'מקום סיום']);
-            let passengersStr = findColumn(row, ['נוסעים', 'passengers', 'Passengers', 'נוסע']);
-            let priceValue = findColumn(row, ['מחיר', 'price', 'Price', 'סכום', 'amount', 'מחיר כולל', 'סך הכל', 'מחיר סופי', 'סה"כ', 'מחיר לתשלום']);
-            
-            // אם לא נמצא לפי שם, נשתמש במיקום לפי הלוגים:
-            // __EMPTY: תאריך ושעה (index 0) - פורמט: "2025-11-29 21:00"
-            // __EMPTY_1: תאריך הזמנה (index 1)
-            // __EMPTY_2: מספר הזמנה (index 2) - פורמט: "77954422"
-            // __EMPTY_5: מקור (index 5)
-            // __EMPTY_6: יעד (index 6)
-            // __EMPTY_9: מחיר (index 9) - פורמט: "₪ 76.09"
-            // __EMPTY_10: נוסעים (index 10)
-            
-            // חילוץ מספר הזמנה
-            let orderNumberStr = null;
-            if (row.hasOwnProperty('__EMPTY_2')) {
-              orderNumberStr = String(row.__EMPTY_2 || '').trim();
-            }
-            // נסה גם לחלץ מספר מהמחרוזת אם יש
-            const orderNumber = orderNumberStr ? (orderNumberStr.match(/\d+/)?.[0] || orderNumberStr) : null;
-            
-            if (!dateStr && row.hasOwnProperty('__EMPTY')) {
-              // תאריך ושעה ביחד - פורמט: "2025-11-29 21:00"
-              const dateTimeStr = String(row.__EMPTY || '').trim();
-              if (dateTimeStr) {
-                const parts = dateTimeStr.split(/\s+/);
-                if (parts.length >= 2) {
-                  dateStr = parts[0] || '';
-                  timeStr = parts.slice(1).join(' ') || '';
-                } else {
-                  dateStr = dateTimeStr;
-                }
-              }
-            }
-            if (!sourceStr && row.hasOwnProperty('__EMPTY_5')) {
-              sourceStr = String(row.__EMPTY_5 || '').trim();
-            }
-            if (!destStr && row.hasOwnProperty('__EMPTY_6')) {
-              destStr = String(row.__EMPTY_6 || '').trim();
-            }
-            if (!passengersStr && row.hasOwnProperty('__EMPTY_10')) {
-              passengersStr = String(row.__EMPTY_10 || '').trim();
-            }
-            if (!priceValue && row.hasOwnProperty('__EMPTY_9')) {
-              priceValue = String(row.__EMPTY_9 || '').trim();
-            }
-            
-            // אם לא נמצא ונמצא עמודה אוטומטית, נשתמש בה
-            if ((!priceValue || priceValue === 0 || priceValue === '') && autoPriceColumnKey && row[autoPriceColumnKey] !== undefined) {
-              priceValue = row[autoPriceColumnKey];
-            }
-            
-            // טיפול במחיר - יכול להיות מספר או מחרוזת
-            let price = 0;
-            if (priceValue !== null && priceValue !== undefined && priceValue !== '') {
-              if (typeof priceValue === 'number') {
-                price = priceValue;
-              } else {
-                // הסרת תווים מיותרים (₪, פסיקים, רווחים)
-                const cleanPrice = String(priceValue).replace(/[₪,\s]/g, '').trim();
-                const parsed = parseFloat(cleanPrice);
-                price = isNaN(parsed) ? 0 : parsed;
-              }
-            }
-            
-            const parsedRow = {
-              date: dateStr || '',
-              time: timeStr || '',
-              source: sourceStr || '',
-              destination: destStr || '',
-              passengers: passengersStr || '',
-              price: price,
-              orderNumber: orderNumber || null,
-              rawData: row,
-              index: index
-            };
-            
-            return parsedRow;
+            // גט - שימוש בפונקציה נפרדת לפרסור
+            return parseGettRow(row, index, autoPriceColumnKey, findColumn);
           }
           return { rawData: row, index: index };
         }).filter(item => {
@@ -545,13 +796,16 @@ export async function parseFile(file, fileType) {
     const text = await file.text();
     
     if (fileType === 'ride') {
-      return await parseRideFile(text, file.name);
+      const result = await parseRideFile(text, file.name);
+      return result;
     } else if (fileType === 'employees') {
-      return await parseEmployeesFile(text);
+      const result = await parseEmployeesFile(text);
+      return result;
     }
   } else if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
     if (fileType === 'bontour' || fileType === 'hori' || fileType === 'gett') {
-      return await parseExcelFile(file, fileType);
+      const result = await parseExcelFile(file, fileType);
+      return result;
     }
   }
   

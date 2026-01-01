@@ -5,11 +5,67 @@ import { useState, useCallback, memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 // Icons
-import { ChevronDown, ChevronUp, Building2, DollarSign, TrendingUp, RefreshCw } from 'lucide-react';
+import { ChevronDown, ChevronUp, Building2, DollarSign, TrendingUp, RefreshCw, Trash2 } from 'lucide-react';
 
-const DepartmentBreakdown = memo(function DepartmentBreakdown({ departmentData, employeeMap, onUpdateDepartmentData }) {
+// Utils
+import { logActivity, getAllActivities } from '../utils/activityLogger';
+
+const DepartmentBreakdown = memo(function DepartmentBreakdown({ 
+  departmentData, 
+  employeeMap, 
+  onUpdateDepartmentData,
+  tripsRemovedFromReview = new Set(),
+  onUpdateTripsRemovedFromReview,
+  activityLogs = [],
+  setActivityLogs
+}) {
   const [expandedDepartment, setExpandedDepartment] = useState(null);
   const [employeeDepartmentAssignments, setEmployeeDepartmentAssignments] = useState(new Map());
+
+  /**
+   * חילוץ שם עובד מ-passengers field לפי מיקום ה-PID
+   * @param {number|string} pid - מספר העובד
+   * @param {string} passengersStr - מחרוזת נוסעים
+   * @param {Array} allPids - כל ה-PIDs של הנסיעה (למיקום)
+   * @returns {string|null} שם העובד או null אם לא נמצא
+   */
+  const getEmployeeNameFromPassengers = useCallback((pid, passengersStr, allPids = []) => {
+    if (!passengersStr || !pid) {
+      return null;
+    }
+    
+    const trimmed = String(passengersStr).trim();
+    if (!trimmed) return null;
+    
+    // פיצול לפי מפרידים שונים (; או , או שורה חדשה)
+    const parts = trimmed.split(/[;,\n]/).map(p => p.trim()).filter(p => p && p.length > 0);
+    
+    // מצא את המיקום של ה-PID ב-allPids
+    const pidIndex = allPids.findIndex(p => String(p) === String(pid));
+    
+    // אם מצאנו את המיקום, קח את הנוסע באותו מיקום
+    if (pidIndex >= 0 && pidIndex < parts.length) {
+      const passengerPart = parts[pidIndex];
+      
+      // חלץ את השם מהחלק - הסר מספרים בסוף (מספר ויזה)
+      // פורמט: "שם פרטי שם משפחה 12345" או "שם פרטי שם משפחה 12345 משהו אחר"
+      // נסה להסיר מספרים בסוף
+      let name = passengerPart.replace(/\s+\d+.*$/, '').trim();
+      
+      // אם עדיין יש מספרים, נסה להסיר אותם
+      if (name && /^\d+$/.test(name)) {
+        // אם השם הוא רק מספר, נסה לקחת את כל המילים חוץ מהמספר האחרון
+        const words = passengerPart.split(/\s+/).filter(w => w && !/^\d+$/.test(w));
+        name = words.join(' ').trim();
+      }
+      
+      if (name && name.length > 0 && !/^\d+$/.test(name)) {
+        return name;
+      }
+    }
+    
+    return null;
+  }, []);
 
   const toggleExpand = useCallback((dept) => {
     setExpandedDepartment(prev => prev === dept ? null : dept);
@@ -24,6 +80,28 @@ const DepartmentBreakdown = memo(function DepartmentBreakdown({ departmentData, 
       return newMap;
     });
   }, []);
+
+  const handleRemoveRide = useCallback((rideId) => {
+    if (!rideId || !onUpdateTripsRemovedFromReview) return;
+    
+    // הוספת הנסיעה ל-`tripsRemovedFromReview`
+    onUpdateTripsRemovedFromReview(prev => {
+      const newSet = new Set(prev);
+      if (!newSet.has(rideId)) {
+        newSet.add(rideId);
+        
+        // הוספת לוג לפעילות
+        if (setActivityLogs) {
+          const ride = departmentData.breakdown.find(item => item.rideId === rideId)?.ride;
+          if (ride) {
+            logActivity('ride_removed', rideId, ride, { source: 'department_breakdown' });
+            setActivityLogs(getAllActivities());
+          }
+        }
+      }
+      return newSet;
+    });
+  }, [onUpdateTripsRemovedFromReview, departmentData, setActivityLogs]);
 
   if (!departmentData || !departmentData.totals || departmentData.totals.length === 0) {
     return (
@@ -133,7 +211,14 @@ const DepartmentBreakdown = memo(function DepartmentBreakdown({ departmentData, 
             <div className="flex items-center justify-center gap-2 mb-3">
               <TrendingUp className="w-6 h-6 text-purple-600" />
               <div className="text-3xl font-bold text-purple-600">
-                {departmentData.breakdown.length}
+                {departmentData.breakdown.filter(item => {
+                  const rideId = item.ride?.rideId;
+                  if (!rideId) return true;
+                  if (tripsRemovedFromReview && typeof tripsRemovedFromReview.has === 'function') {
+                    return !tripsRemovedFromReview.has(rideId);
+                  }
+                  return true;
+                }).length}
               </div>
             </div>
             <div className="text-sm font-semibold text-gray-700">סה"כ נסיעות</div>
@@ -145,6 +230,15 @@ const DepartmentBreakdown = memo(function DepartmentBreakdown({ departmentData, 
           {departmentData.totals.map((dept, index) => {
             const isExpanded = expandedDepartment === dept.department;
             const rides = departmentData.breakdown
+              .filter(item => {
+                // סינון נסיעות שהוסרו מהרייד
+                const rideId = item.ride?.rideId;
+                if (!rideId) return true;
+                if (tripsRemovedFromReview && typeof tripsRemovedFromReview.has === 'function') {
+                  return !tripsRemovedFromReview.has(rideId);
+                }
+                return true;
+              })
               .filter(item => item.departments.some(d => d.department === dept.department))
               .map(item => ({
                 ...item,
@@ -250,7 +344,18 @@ const DepartmentBreakdown = memo(function DepartmentBreakdown({ departmentData, 
                                   transition={{ delay: idx * 0.03 }}
                                 >
                                   <td className="px-4 py-3 text-sm text-gray-900 font-medium">
-                                    {item.rideId}
+                                    <div className="flex items-center gap-2">
+                                      <span>{item.rideId}</span>
+                                      {item.rideId && tripsRemovedFromReview && typeof tripsRemovedFromReview.has === 'function' && tripsRemovedFromReview.has(item.rideId) && (
+                                        <motion.span
+                                          className="inline-flex items-center px-2 py-0.5 text-xs font-semibold rounded-full bg-gradient-to-r from-orange-100 to-orange-50 text-orange-800 border border-orange-200"
+                                          initial={{ scale: 0 }}
+                                          animate={{ scale: 1 }}
+                                        >
+                                          הוסר מהרייד
+                                        </motion.span>
+                                      )}
+                                    </div>
                                   </td>
                                   <td className="px-4 py-3 text-sm text-gray-900">
                                     {item.ride.date}
@@ -267,10 +372,24 @@ const DepartmentBreakdown = memo(function DepartmentBreakdown({ departmentData, 
                                       item.ride.pids && item.ride.pids.length > 0 ? (
                                         <div className="space-y-2">
                                           {item.ride.pids.map((pid, pidIdx) => {
-                                            const employee = employeeMap?.get(pid);
-                                            const employeeName = employee 
-                                              ? `${employee.firstName} ${employee.lastName}` 
-                                              : `PID: ${pid}`;
+                                            // ניסיון למצוא את העובד - ננסה גם כמספר וגם כמחרוזת
+                                            const pidNum = typeof pid === 'string' ? parseInt(pid) : pid;
+                                            const employee = employeeMap?.get(pidNum) || employeeMap?.get(pid) || employeeMap?.get(String(pid));
+                                            
+                                            // קודם נבדוק אם יש עובד ב-employeeMap (עדיף)
+                                            let employeeName;
+                                            if (employee && (employee.firstName || employee.lastName)) {
+                                              employeeName = `${employee.firstName || ''} ${employee.lastName || ''}`.trim();
+                                            } else {
+                                              // אם אין ב-employeeMap, ננסה לחלץ מ-passengers לפי מיקום
+                                              const nameFromPassengers = getEmployeeNameFromPassengers(pid, item.ride.passengers, item.ride.pids || []);
+                                              if (nameFromPassengers) {
+                                                employeeName = nameFromPassengers;
+                                              } else {
+                                                employeeName = `עובד ${pid}`;
+                                              }
+                                            }
+                                            
                                             const assignedDept = employeeDepartmentAssignments.get(`${item.rideId}-${pid}`);
                                             
                                             return (
@@ -306,6 +425,18 @@ const DepartmentBreakdown = memo(function DepartmentBreakdown({ departmentData, 
                                               <option key={deptName} value={deptName}>{deptName}</option>
                                             ))}
                                           </select>
+                                          <div className="flex items-center gap-2 mt-2">
+                                            <motion.button
+                                              onClick={() => handleRemoveRide(item.rideId)}
+                                              className="inline-flex items-center gap-1 px-3 py-1.5 bg-red-500 text-white text-xs font-semibold rounded-lg hover:bg-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                              whileHover={{ scale: 1.05 }}
+                                              whileTap={{ scale: 0.95 }}
+                                              disabled={item.rideId && tripsRemovedFromReview && tripsRemovedFromReview.has(item.rideId)}
+                                            >
+                                              <Trash2 className="w-3 h-3" />
+                                              הסר
+                                            </motion.button>
+                                          </div>
                                         </div>
                                       )
                                     ) : (

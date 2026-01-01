@@ -1,3 +1,11 @@
+import { 
+  GETT_SUPPLIER_NAMES, 
+  GETT_TIME_TOLERANCE_MINUTES, 
+  GETT_DATE_SEARCH_RANGE_DAYS,
+  GETT_MAX_SEARCH_TIME_DIFF_MINUTES,
+  GETT_PERFECT_MATCH_TIME_DIFF_MINUTES
+} from './gettConstants.js';
+
 /**
  * נרמול שמות מקומות להשוואה
  * @param {string} location - שם המקום
@@ -72,6 +80,75 @@ function getTimeDifferenceInMinutes(date1, time1, date2, time2) {
 }
 
 /**
+ * השוואת שני מיקומים מנורמלים
+ * בודקת אם המיקומים זהים או דומים מספיק להתאמה
+ * @param {string} loc1 - מיקום ראשון (מנורמל)
+ * @param {string} loc2 - מיקום שני (מנורמל)
+ * @returns {boolean} true אם המיקומים תואמים
+ */
+function locationsMatch(loc1, loc2) {
+  if (!loc1 || !loc2) return false;
+  
+  // נרמול נוסף - החלפת סימנים מיוחדים והסרת "ישראל"
+  const normalizeForMatch = (str) => {
+    return str
+      .replace(/\bישראל\b/g, '') // הסרת "ישראל"
+      .replace(/[\/\-,;]/g, ' ') // החלפת /, -, ,, ; ברווח
+      .replace(/\s+/g, ' ') // רווחים מרובים לרווח אחד
+      .trim();
+  };
+  
+  const norm1 = normalizeForMatch(loc1);
+  const norm2 = normalizeForMatch(loc2);
+  
+  // בדיקה פשוטה: זהים או אחד מכיל את השני
+  if (norm1 === norm2 || norm1.includes(norm2) || norm2.includes(norm1)) {
+    return true;
+  }
+  
+  // בדיקה לפי מילים משותפות (ללא תלות בסדר)
+  const words1 = norm1.split(/\s+/).filter(w => w && w.length > 1);
+  const words2 = norm2.split(/\s+/).filter(w => w && w.length > 1);
+  
+  // אם יש פחות מ-2 מילים, נשתמש בבדיקה הפשוטה
+  if (words1.length < 2 || words2.length < 2) {
+    return false;
+  }
+  
+  // נסיר כפילויות ונבדוק אם לפחות 2 מילים משותפות
+  const uniqueWords1 = Array.from(new Set(words1));
+  const uniqueWords2 = Array.from(new Set(words2));
+  const commonWords = uniqueWords1.filter(w => uniqueWords2.includes(w));
+  
+  // אם יש לפחות 2 מילים משותפות, נחשב שזה תואם
+  if (commonWords.length >= 2) {
+    return true;
+  }
+  
+  // בדיקה נוספת: אם שתי המיקומים באותה עיר (לאחר הסרת מספרים)
+  // רשימת ערים נפוצות בישראל
+  const cities = ['תל אביב', 'ירושלים', 'חיפה', 'באר שבע', 'נתניה', 'אשדוד', 'רמת גן', 'חולון', 'בני ברק', 'אשקלון', 'רחובות', 'בת ים', 'כפר סבא', 'הרצליה', 'רמלה', 'לוד', 'רעננה', 'מודיעין', 'נצרת', 'אילת', 'עכו', 'קריית גת', 'קריית שמונה', 'קריית ים', 'קריית מוצקין', 'קריית ביאליק', 'קריית אתא', 'קריית מלאכי', 'קריית אונו', 'קריית טבעון', 'ראשון לציון', 'פתח תקווה', 'רמת השרון', 'גבעתיים', 'אור יהודה', 'יהוד', 'גבעת שמואל', 'יפו'];
+  
+  // הסרת מספרים מהמיקומים
+  const loc1WithoutNumbers = norm1.replace(/\d+/g, '').trim();
+  const loc2WithoutNumbers = norm2.replace(/\d+/g, '').trim();
+  
+  // בדיקה אם שתי המיקומים מכילים את אותה עיר
+  // אם כן, זה מתאים (הרחוב לא חשוב)
+  for (const city of cities) {
+    const hasCity1 = loc1WithoutNumbers.includes(city) || norm1.includes(city);
+    const hasCity2 = loc2WithoutNumbers.includes(city) || norm2.includes(city);
+    
+    if (hasCity1 && hasCity2) {
+      // אם שתי המיקומים באותה עיר, זה מתאים (הרחוב לא חשוב)
+      return true;
+    }
+  }
+  
+  return false;
+}
+
+/**
  * בדיקה אם יש נוסע משותף בין נסיעת רייד לנסיעת גט
  * @param {number[]} ridePids - מערך של PIDs מנסיעת רייד
  * @param {string} gettPassengersStr - מחרוזת נוסעים מנסיעת גט
@@ -82,9 +159,8 @@ function hasCommonPassenger(ridePids, gettPassengersStr, employeeMap) {
   if (!ridePids || ridePids.length === 0) return false;
   if (!gettPassengersStr) return false;
   
-  const ridePidsSet = new Set(ridePids.map(p => p.toString()));
-  
   // 1. חיפוש מספרים בתוך מחרוזת הנוסעים של גט
+  const ridePidsSet = new Set(ridePids.map(p => p.toString()));
   const gettNumbers = gettPassengersStr.match(/\d+/g) || [];
   const numericMatch = gettNumbers.some(num => ridePidsSet.has(num));
   
@@ -93,113 +169,93 @@ function hasCommonPassenger(ridePids, gettPassengersStr, employeeMap) {
   }
   
   // 2. אם יש employeeMap, ננסה למצוא התאמה לפי שמות
-  if (employeeMap && employeeMap.size > 0) {
-    // נמיר את ridePids לשמות עובדים
-    const rideNamesSet = new Set();
-    const rideNamesDetails = [];
-    ridePids.forEach(pid => {
-      const emp = employeeMap.get(pid);
-      if (emp) {
-        const fullName = `${emp.firstName} ${emp.lastName}`.trim();
-        if (fullName) {
-          rideNamesSet.add(fullName.toLowerCase());
-          rideNamesDetails.push({pid, fullName: fullName.toLowerCase(), firstName: emp.firstName ? emp.firstName.toLowerCase() : null, lastName: emp.lastName ? emp.lastName.toLowerCase() : null});
-          // גם שם פרטי בלבד ושם משפחה בלבד
-          if (emp.firstName) rideNamesSet.add(emp.firstName.toLowerCase());
-          if (emp.lastName) rideNamesSet.add(emp.lastName.toLowerCase());
-        }
-      } else {
-        rideNamesDetails.push({pid, fullName: null, firstName: null, lastName: null});
+  if (!employeeMap || employeeMap.size === 0) {
+    return false;
+  }
+  
+  // המרת ridePids לשמות עובדים
+  const rideNamesSet = new Set();
+  const rideNamesDetails = [];
+  ridePids.forEach(pid => {
+    const emp = employeeMap.get(pid);
+    if (emp) {
+      const fullName = `${emp.firstName} ${emp.lastName}`.trim();
+      if (fullName) {
+        rideNamesSet.add(fullName.toLowerCase());
+        rideNamesDetails.push({
+          pid,
+          fullName: fullName.toLowerCase(),
+          firstName: emp.firstName ? emp.firstName.toLowerCase() : null,
+          lastName: emp.lastName ? emp.lastName.toLowerCase() : null
+        });
+        if (emp.firstName) rideNamesSet.add(emp.firstName.toLowerCase());
+        if (emp.lastName) rideNamesSet.add(emp.lastName.toLowerCase());
       }
-    });
+    } else {
+      rideNamesDetails.push({pid, fullName: null, firstName: null, lastName: null});
+    }
+  });
+  
+  // אם אין שמות ב-employeeMap לפי PID, ננסה לחפש ישירות ב-employeeMap
+  if (rideNamesSet.size === 0) {
+    const gettClean = gettPassengersStr.toLowerCase().replace(/[*|,;]/g, ' ').replace(/\s+/g, ' ').trim();
+    const gettWords = gettClean.split(' ').filter(w => w && w.length > 1);
     
-    if (rideNamesSet.size === 0) {
-      // אם אין שמות ב-employeeMap לפי PID, ננסה לחפש את השם ישירות ב-employeeMap
-      // זה יכול לקרות אם יש אי-התאמה ב-PID (למשל, employeeId שונה מ-PID)
-      if (gettPassengersStr && employeeMap) {
-        const gettClean = gettPassengersStr.toLowerCase().replace(/[*|,;]/g, ' ').replace(/\s+/g, ' ').trim();
-        const gettWords = gettClean.split(' ').filter(w => w && w.length > 1);
-        
-        // נחפש את השם ב-employeeMap
-        for (const [empId, emp] of employeeMap.entries()) {
-          const empFullName = `${emp.firstName} ${emp.lastName}`.trim().toLowerCase();
-          const empFirstName = emp.firstName ? emp.firstName.toLowerCase().trim() : '';
-          const empLastName = emp.lastName ? emp.lastName.toLowerCase().trim() : '';
-          
-          // בדיקה אם השם מגט תואם לשם העובד
-          if (gettClean === empFullName || 
-              (gettWords.length >= 2 && gettWords[0] === empFirstName && gettWords[1] === empLastName) ||
-              (empFullName.includes(gettClean) || gettClean.includes(empFullName))) {
+    // חיפוש השם ב-employeeMap
+    for (const [empId, emp] of employeeMap.entries()) {
+      const empFullName = `${emp.firstName} ${emp.lastName}`.trim().toLowerCase();
+      const empFirstName = emp.firstName ? emp.firstName.toLowerCase().trim() : '';
+      const empLastName = emp.lastName ? emp.lastName.toLowerCase().trim() : '';
+      
+      if (gettClean === empFullName || 
+          (gettWords.length >= 2 && gettWords[0] === empFirstName && gettWords[1] === empLastName) ||
+          (empFullName.includes(gettClean) || gettClean.includes(empFullName))) {
+        return true;
+      }
+    }
+    
+    // אם יש שם בגט אבל לא נמצא ב-employeeMap, נחזיר true
+    if (gettClean && gettClean.trim().length > 0) {
+      return true;
+    }
+    
+    return false;
+  }
+  
+  // בדיקה אם שמות בגט תואמים לשמות ברייד
+  const gettClean = gettPassengersStr.toLowerCase().replace(/[*|,;]/g, ' ').replace(/\s+/g, ' ').trim();
+  
+  // התאמה מדויקת
+  for (const rideName of rideNamesSet) {
+    if (rideName && gettClean.includes(rideName)) {
+      return true;
+    }
+  }
+  
+  // התאמה חלקית לפי שם משפחה (מטפלת בשגיאות כתיב בשם הפרטי)
+  const gettWords = gettClean.split(' ').filter(w => w && w.length > 1);
+  for (const rideNameDetail of rideNamesDetails) {
+    if (rideNameDetail.lastName && rideNameDetail.lastName.trim()) {
+      const lastName = rideNameDetail.lastName.trim();
+      
+      // בדיקה אם שם המשפחה מופיע בגט
+      if (gettWords.some(word => word === lastName || lastName.includes(word) || word.includes(lastName))) {
+        // אם יש גם שם פרטי בגט, נבדוק שהוא דומה (לפחות 2 תווים תואמים)
+        const firstNameInGett = gettWords.find(word => word !== lastName && !lastName.includes(word) && !word.includes(lastName));
+        if (firstNameInGett && rideNameDetail.firstName) {
+          const firstName = rideNameDetail.firstName.trim();
+          let commonChars = 0;
+          for (let i = 0; i < Math.min(firstNameInGett.length, firstName.length); i++) {
+            if (firstNameInGett[i] === firstName[i]) commonChars++;
+          }
+          if (commonChars >= 2 || gettWords.some(word => word === lastName)) {
             return true;
           }
-        }
-        
-        // אם PID לא נמצא ב-employeeMap אבל יש שם בגט, נחזיר true
-        // זה יכול לקרות אם העובד לא נמצא בקובץ העובדים או שיש אי-התאמה ב-PID
-        // נחזיר true רק אם יש שם בגט (כלומר, גט הזדהה מישהו)
-        if (gettClean && gettClean.trim().length > 0) {
+        } else if (gettWords.some(word => word === lastName)) {
+          // אם רק שם המשפחה תואם, נחשב זאת כמתאים
           return true;
         }
       }
-      
-      return false;
-    }
-    
-    // נבדוק אם שמות בגט תואמים לשמות ברייד
-    const gettPassengersLower = gettPassengersStr.toLowerCase();
-    
-    // נסיר תווים מיוחדים כמו **, *, , וכו'
-    const gettClean = gettPassengersLower.replace(/[*|,;]/g, ' ').replace(/\s+/g, ' ').trim();
-    
-    // נבדוק אם אחד השמות ב-rideNamesSet מופיע ב-gettClean
-    let nameMatch = false;
-    let matchedName = null;
-    for (const rideName of rideNamesSet) {
-      if (rideName && gettClean.includes(rideName)) {
-        nameMatch = true;
-        matchedName = rideName;
-        break;
-      }
-    }
-    
-    // אם לא נמצאה התאמה מדויקת, ננסה התאמה חלקית לפי שם משפחה
-    // זה מטפל במקרים של שגיאות כתיב בשם הפרטי (למשל "נגה" vs "נועה")
-    if (!nameMatch) {
-      const gettWords = gettClean.split(' ').filter(w => w && w.length > 1);
-      for (const rideNameDetail of rideNamesDetails) {
-        if (rideNameDetail.lastName && rideNameDetail.lastName.trim()) {
-          const lastName = rideNameDetail.lastName.trim();
-          // נבדוק אם שם המשפחה מופיע בגט
-          if (gettWords.some(word => word === lastName || lastName.includes(word) || word.includes(lastName))) {
-            // אם יש גם שם פרטי בגט, נבדוק שהוא דומה (לפחות 2 תווים תואמים)
-            const firstNameInGett = gettWords.find(word => word !== lastName && !lastName.includes(word) && !word.includes(lastName));
-            if (firstNameInGett && rideNameDetail.firstName) {
-              const firstName = rideNameDetail.firstName.trim();
-              // נבדוק אם יש חפיפה של לפחות 2 תווים בין השם הפרטי בגט לשם הפרטי ב-employeeMap
-              // זה יטפל במקרים כמו "נועה" vs "נגה" (יש חפיפה של "נה")
-              let commonChars = 0;
-              for (let i = 0; i < Math.min(firstNameInGett.length, firstName.length); i++) {
-                if (firstNameInGett[i] === firstName[i]) commonChars++;
-              }
-              // אם יש חפיפה של לפחות 2 תווים או ששם המשפחה תואם בדיוק
-              if (commonChars >= 2 || gettWords.some(word => word === lastName)) {
-                nameMatch = true;
-                matchedName = rideNameDetail.fullName;
-                break;
-              }
-            } else if (gettWords.some(word => word === lastName)) {
-              // אם רק שם המשפחה תואם, נחשב זאת כמתאים
-              nameMatch = true;
-              matchedName = rideNameDetail.fullName;
-              break;
-            }
-          }
-        }
-      }
-    }
-    
-    if (nameMatch) {
-      return true;
     }
   }
   
@@ -219,7 +275,7 @@ export function matchBontourToRides(bontourData, rides) {
   const matchedRideIds = new Set();
   
   // עוברים על כל נסיעות בון תור (הספק הגיש לרייד)
-  bontourData.forEach(bontour => {
+  bontourData.forEach((bontour, idx) => {
     const rideId = bontour.orderNumber;
     const ride = rideMap.get(rideId);
     
@@ -537,58 +593,66 @@ function findMatchInNext4RidesInMonth(
 }
 
 /**
- * נרמול מיקום לגט (כולל מספרים)
+ * הסרת תווים מיוחדים ממיקום
+ * @param {string} loc - מיקום לניקוי
+ * @returns {string} מיקום ללא תווים מיוחדים
  */
-function normalizeGettLocation(loc) {
+function removeSpecialCharacters(loc) {
   if (!loc) return '';
-  let normalized = loc
+  return loc
     .trim()
     .replace(/[|]/g, '') // הסרת סימן |
-    .replace(/\\/g, '') // הסרת backslash (כדי להתאים "25\6" עם "256")
-    .replace(/`/g, '') // הסרת backtick (כדי להתאים "אצ``ל" עם "אצל")
-    .replace(/"/g, '') // הסרת גרשיים (כדי להתאים "חס\"ם" עם "חסם")
+    .replace(/\\/g, '') // הסרת backslash
+    .replace(/`/g, '') // הסרת backtick
+    .replace(/"/g, '') // הסרת גרשיים
     .trim();
-  
-  // הסרת אותיות בודדות אחרי מספרים (כמו "א" אחרי "84")
-  // לדוגמה: "מכבים 84 א" -> "מכבים 84"
-  // זה יעזור להתאים "מכבים 84 א" עם "מכבים 84"
-  // חשוב לעשות את זה לפני החלפת ,; כי אחרת ה-א עלול להישאר
-  // נחפש מספר, רווח, אות עברית, ואז רווח/פסיק/נקודה-פסיק/סוף מחרוזת
-  // אם יש רווח אחרי האות ואז פסיק, נסיר גם את הרווח
-  normalized = normalized.replace(/(\d+)\s+([א-ת])(\s*[,;]|\s+|$)/g, (match, num, letter, after) => {
-    // אם יש פסיק/נקודה-פסיק, נסיר את הרווחים לפניו
+}
+
+/**
+ * הסרת אותיות בודדות אחרי מספרים (למשל "84 א" -> "84")
+ * @param {string} loc - מיקום לניקוי
+ * @returns {string} מיקום ללא אותיות בודדות אחרי מספרים
+ */
+function removeSingleLettersAfterNumbers(loc) {
+  if (!loc) return '';
+  return loc.replace(/(\d+)\s+([א-ת])(\s*[,;]|\s+|$)/g, (match, num, letter, after) => {
     if (after && (after.includes(',') || after.includes(';'))) {
       return num + after.trim();
     }
-    // אם יש רק רווח או סוף מחרוזת, נסיר את האות והרווח
     return num + (after === ' ' ? ' ' : (after || ''));
   });
-  
-  // החלפת נקודה-פסיק בפסיק
-  normalized = normalized.replace(/[,;]/g, ',');
-  
-  // הסרת רווחים לפני פסיקים (כדי להתאים "84, שוהם" עם "84 , שוהם")
-  normalized = normalized.replace(/\s+,/g, ',');
-  
-  // הסרת רווחים מרובים לרווח אחד
-  normalized = normalized.replace(/\s+/g, ' ');
-  
-  // הסרת כפילות - אם יש אותו טקסט פעמיים (עם או בלי פסיק), נסיר את הכפילות
-  // לדוגמה: "חסם 17 רחובות חסם 17, רחובות" -> "חסם 17, רחובות"
-  // קודם נטפל בכפילות בתוך חלק אחד (בלי פסיקים)
-  // נחפש מילים כפולות ברצף - אם יש רצף של מילים שמופיע פעמיים, נסיר את הכפילות
-  const words = normalized.split(/\s+/);
+}
+
+/**
+ * איחוד סימני פיסוק - החלפת נקודה-פסיק בפסיק וניקוי רווחים
+ * @param {string} loc - מיקום לניקוי
+ * @returns {string} מיקום עם סימני פיסוק מאוחדים
+ */
+function normalizePunctuation(loc) {
+  if (!loc) return '';
+  return loc
+    .replace(/[,;]/g, ',') // החלפת נקודה-פסיק בפסיק
+    .replace(/\s+,/g, ',') // הסרת רווחים לפני פסיקים
+    .replace(/\s+/g, ' '); // רווחים מרובים לרווח אחד
+}
+
+/**
+ * הסרת כפילויות ברצף מילים
+ * @param {string} loc - מיקום לניקוי
+ * @returns {string} מיקום ללא כפילויות ברצף
+ */
+function removeDuplicateWords(loc) {
+  if (!loc) return '';
+  const words = loc.split(/\s+/);
   const deduplicatedWords = [];
   for (let i = 0; i < words.length; i++) {
-    // נבדוק אם המילה הנוכחית היא תחילת רצף שמופיע פעמיים
     let isDuplicate = false;
     for (let seqLen = 1; seqLen <= Math.floor(words.length / 2) && i + seqLen * 2 <= words.length; seqLen++) {
       const seq1 = words.slice(i, i + seqLen).join(' ');
       const seq2 = words.slice(i + seqLen, i + seqLen * 2).join(' ');
       if (seq1 === seq2) {
-        // מצאנו רצף כפול - נדלג על הכפילות
-        i += seqLen - 1; // נעבור למילה אחרי הרצף הראשון
-        isDuplicate = false; // נוסיף את הרצף הראשון
+        i += seqLen - 1;
+        isDuplicate = false;
         break;
       }
     }
@@ -596,25 +660,28 @@ function normalizeGettLocation(loc) {
       deduplicatedWords.push(words[i]);
     }
   }
-  normalized = deduplicatedWords.join(' ');
-  
-  // עכשיו נחלק לפי פסיק, נסיר כפילויות בין חלקים, ונחבר שוב
-  const parts = normalized.split(',').map(p => p.trim()).filter(p => p);
+  return deduplicatedWords.join(' ');
+}
+
+/**
+ * הסרת כפילויות בין חלקים מופרדים בפסיק
+ * @param {string} loc - מיקום לניקוי
+ * @returns {string} מיקום ללא כפילויות בין חלקים
+ */
+function removeDuplicateParts(loc) {
+  if (!loc) return '';
+  const parts = loc.split(',').map(p => p.trim()).filter(p => p);
   const uniqueParts = [];
   const seen = new Set();
   for (const part of parts) {
-    // נבדוק אם החלק הזה כבר קיים (בדיוק או כחלק מטקסט ארוך יותר)
     let isDuplicate = false;
     for (const seenPart of seen) {
-      // אם החלק הזה זהה לחלק שכבר ראינו, או מכיל אותו, או מכוסה על ידו
       if (part === seenPart) {
         isDuplicate = true;
         break;
       }
-      // אם אחד מהם מכיל את השני, נשתמש בארוך יותר
       if (part.includes(seenPart) || seenPart.includes(part)) {
         if (part.length > seenPart.length) {
-          // החלק הנוכחי ארוך יותר - נחליף את החלק הישן
           const index = uniqueParts.indexOf(seenPart);
           if (index !== -1) {
             uniqueParts[index] = part;
@@ -631,179 +698,193 @@ function normalizeGettLocation(loc) {
       seen.add(part);
     }
   }
-  normalized = uniqueParts.join(', ');
+  return uniqueParts.join(', ');
+}
+
+/**
+ * תרגום שמות באנגלית לעברית
+ * @param {string} loc - מיקום לתרגום
+ * @returns {string} מיקום מתורגם
+ */
+function translateEnglishToHebrew(loc) {
+  if (!loc) return '';
+  return loc
+    .replace(/\bHartum\s+St\b/gi, 'חרות')
+    .replace(/\bSt\s*\.?\s*Hartum\b/gi, 'חרות')
+    .replace(/\bNetanya\b/gi, 'נתניה')
+    .replace(/\bRa'?anana\b/gi, 'רעננה')
+    .replace(/\bIsrael\b/gi, '')
+    .trim();
+}
+
+/**
+ * הרחבת קיצורים (נתבג, בן גוריון)
+ * @param {string} loc - מיקום להרחבה
+ * @returns {string} מיקום עם קיצורים מורחבים
+ */
+function expandAbbreviations(loc) {
+  if (!loc) return '';
+  let expanded = loc;
   
-  // תרגום שמות רחובות באנגלית לעברית
-  // "Hartum St" -> "רחוב חרות" או "חרות"
-  normalized = normalized.replace(/\bHartum\s+St\b/gi, 'חרות');
-  normalized = normalized.replace(/\bSt\s*\.?\s*Hartum\b/gi, 'חרות');
-  // "Netanya" -> "נתניה"
-  normalized = normalized.replace(/\bNetanya\b/gi, 'נתניה');
-  // "Israel" -> ניתן להתעלם או להסיר
-  normalized = normalized.replace(/\bIsrael\b/gi, '').trim();
+  // "נתבג" -> "שדה תעופה בן גוריון"
+  expanded = expanded.replace(/(^|\s)נתבג(\s|$|,|-)/g, '$1שדה תעופה בן גוריון$2');
+  
+  // "בן גוריון" -> "שדה תעופה בן גוריון" רק אם זה באמת שדה תעופה
+  // לא נתרגם אם יש מספר אחרי "בן גוריון" (כמו "בן גוריון 3" = רחוב)
+  // ולא נתרגם אם זה חלק ממיקום שכבר מכיל עיר אחרת (כמו "בן גוריון 3 ; רמלה")
+  if (expanded.includes('בן גוריון') && !expanded.includes('שדה תעופה')) {
+    // נבדוק אם "בן גוריון" מופיע עם מספר אחריו (כמו "בן גוריון 3")
+    const hasNumberAfter = /\bבן גוריון\s+\d+/.test(expanded);
+    
+    // נבדוק אם יש עיר אחרי הפסיק (למשל "בן גוריון 3, רמלה")
+    const parts = expanded.split(',');
+    const hasCityAfter = parts.length > 1 && parts[1].trim().length > 0;
+    
+    // רשימת ערים נפוצות לזיהוי
+    const cities = ['תל אביב', 'ירושלים', 'חיפה', 'באר שבע', 'נתניה', 'אשדוד', 'רמת גן', 'חולון', 'בני ברק', 'אשקלון', 'רחובות', 'בת ים', 'כפר סבא', 'הרצליה', 'רמלה', 'לוד', 'רעננה', 'מודיעין', 'נצרת', 'אילת', 'עכו', 'קריית גת', 'קריית שמונה', 'קריית ים', 'קריית מוצקין', 'קריית ביאליק', 'קריית אתא', 'קריית מלאכי', 'קריית אונו', 'קריית טבעון', 'ראשון לציון', 'פתח תקווה', 'רמת השרון', 'גבעתיים', 'אור יהודה', 'יהוד', 'גבעת שמואל'];
+    const hasKnownCityAfter = parts.length > 1 && cities.some(city => parts[1].trim().includes(city));
+    
+    // נתרגם רק אם אין מספר אחרי ואין עיר אחרי הפסיק (כלומר זה באמת שדה תעופה)
+    if (!hasNumberAfter && !hasCityAfter && !hasKnownCityAfter) {
+      expanded = expanded.replace(/(^|\s)בן גוריון(\s|$|,|-)/g, '$1שדה תעופה בן גוריון$2');
+    }
+  }
+  
+  return expanded;
+}
+
+/**
+ * נרמול מיקום לגט
+ * מטפל בתווים מיוחדים, כפילויות, תרגומים וקיצורים
+ * @param {string} loc - מיקום לנרמול
+ * @returns {string} מיקום מנורמל
+ */
+function normalizeGettLocation(loc) {
+  if (!loc) return '';
+  
+  let normalized = removeSpecialCharacters(loc);
+  normalized = removeSingleLettersAfterNumbers(normalized);
+  normalized = normalizePunctuation(normalized);
+  normalized = removeDuplicateWords(normalized);
+  normalized = removeDuplicateParts(normalized);
+  normalized = translateEnglishToHebrew(normalized);
+  normalized = expandAbbreviations(normalized);
   
   return normalized.trim();
 }
 
 /**
- * בדיקת התאמה בין נסיעת גט לנסיעת רייד
+ * פרסור תאריך ושעה של נסיעת גט
+ * @param {Object} gettRide - נסיעת גט
+ * @param {Function} parseDateTime - פונקציה לפרסור תאריכים
+ * @returns {Date|null} תאריך ושעה או null אם לא ניתן לפרסר
  */
-function checkRideMatch(gettRide, ride, parseDateTime, hasCommonPassenger, normalizeGettLocation, employeeMap) {
-  const gettDate = parseDateTime(gettRide.date, gettRide.time || '');
-  if (!gettDate) {
-    return false;
-  }
-  
+function parseGettDateTime(gettRide, parseDateTime) {
+  return parseDateTime(gettRide.date, gettRide.time || '');
+}
+
+/**
+ * פרסור תאריך ושעה של נסיעת רייד
+ * @param {Object} ride - נסיעת רייד
+ * @param {Function} parseDateTime - פונקציה לפרסור תאריכים
+ * @returns {Date|null} תאריך ושעה או null אם לא ניתן לפרסר
+ */
+function parseRideDateTime(ride, parseDateTime) {
   const rideDateTime = ride.date;
   const rideTime = rideDateTime.includes(' ') ? rideDateTime.split(' ')[1] : '';
   const rideDate = rideDateTime.split(' ')[0];
-  const hasRideTime = rideDateTime.includes(' ') && rideTime.trim() !== '';
-  const rideDateObj = parseDateTime(rideDate, rideTime);
-  
-  if (!rideDateObj) {
+  return parseDateTime(rideDate, rideTime);
+}
+
+/**
+ * בדיקת התאמת זמן בין שתי נסיעות
+ * @param {Date} gettDate - תאריך נסיעת גט
+ * @param {Date} rideDate - תאריך נסיעת רייד
+ * @param {number} maxDiffMinutes - הפרש זמן מקסימלי (בדקות)
+ * @returns {boolean} true אם הפרש הזמן קטן או שווה למקסימום
+ */
+function checkTimeMatch(gettDate, rideDate, maxDiffMinutes = GETT_TIME_TOLERANCE_MINUTES) {
+  if (!gettDate || !rideDate) {
     return false;
   }
-  
-  // 1. הפרש זמן ≤ 30 דקות (הוגדל מ-10 דקות)
-  // אם אין שעה ברייד, נבדוק רק אם זה אותו יום (בהפרש של עד 24 שעות)
-  const timeDiff = Math.abs(rideDateObj.getTime() - gettDate.getTime()) / (1000 * 60);
-  const timeDiffOK = !hasRideTime ? timeDiff <= 24 * 60 : timeDiff <= 30;
-  
-  if (!timeDiffOK) {
-    return false;
-  }
-  
-  // 2. מקור ויעד זהים
+  const timeDiff = Math.abs(rideDate.getTime() - gettDate.getTime()) / (1000 * 60);
+  return timeDiff <= maxDiffMinutes;
+}
+
+/**
+ * בדיקת התאמת מיקום בין נסיעת גט לנסיעת רייד
+ * @param {Object} gettRide - נסיעת גט
+ * @param {Object} ride - נסיעת רייד
+ * @param {Function} normalizeGettLocation - פונקציה לנרמול מיקומים
+ * @returns {boolean} true אם מקור ויעד תואמים
+ */
+function checkLocationMatch(gettRide, ride, normalizeGettLocation) {
   const gettSourceNorm = normalizeGettLocation(gettRide.source);
   const gettDestNorm = normalizeGettLocation(gettRide.destination);
   const rideSourceNorm = normalizeGettLocation(ride.source);
   const rideDestNorm = normalizeGettLocation(ride.destination);
   
-  // פונקציה עזר לבדיקה אם שני מקומות זהים (גם אם הסדר שונה)
-  // מטפלת גם בקיצורים נפוצים כמו "נתבג" = "נמל התעופה בן גוריון"
-  const locationsMatch = (loc1, loc2) => {
-    if (loc1 === loc2) return true;
-    if (loc1.includes(loc2) || loc2.includes(loc1)) return true;
-    
-    // החלפת קיצורים נפוצים לפני הבדיקה
-    const expandAbbreviations = (loc) => {
-      let expanded = loc.replace(/נתבג/g, 'נמל התעופה בן גוריון');
-      // המרת "שדה תעופה בן גוריון" ל-"נמל התעופה בן גוריון" (אותו דבר)
-      expanded = expanded.replace(/שדה תעופה בן גוריון/g, 'נמל התעופה בן גוריון');
-      // טיפול ב-"Airport/Termin" או "Airport" באנגלית - המרה ל-"נתבג" או "נמל התעופה בן גוריון"
-      // נטפל גם ב-"Terminal" או "Termin" עם מספרים (Terminal 1, Terminal 2, Terminal 3)
-      expanded = expanded.replace(/\bAirport\/Termin\s*\d*\s*,?\s*Israel/gi, 'נתבג');
-      expanded = expanded.replace(/\bAirport\/Terminal\s*\d*\s*,?\s*Israel/gi, 'נתבג');
-      expanded = expanded.replace(/\bAirport\s*,?\s*Israel/gi, 'נתבג');
-      // גם נטפל במקרים ללא "Israel"
-      expanded = expanded.replace(/\bAirport\/Termin\s*\d*/gi, 'נתבג');
-      expanded = expanded.replace(/\bAirport\/Terminal\s*\d*/gi, 'נתבג');
-      // נסיר "Terminal" או "Termin" עם מספרים לפני "נתבג" כדי לאפשר התאמה עם טרמינלים שונים
-      expanded = expanded.replace(/Terminal\s+\d+|Termin\s+\d+|טרמינל\s+\d+/gi, 'טרמינל');
-      // טיפול בשמות רחובות באנגלית - המרה לעברית
-      // "Hartum St" -> "רחוב חרות" או "חרות"
-      expanded = expanded.replace(/\bHartum\s+St\b/gi, 'חרות');
-      expanded = expanded.replace(/\bSt\s*\.?\s*Hartum\b/gi, 'חרות');
-      // "Netanya" -> "נתניה"
-      expanded = expanded.replace(/\bNetanya\b/gi, 'נתניה');
-      // "Israel" -> ניתן להתעלם או להסיר
-      expanded = expanded.replace(/\bIsrael\b/gi, '');
-      return expanded.trim();
-    };
-    
-    const loc1Expanded = expandAbbreviations(loc1);
-    const loc2Expanded = expandAbbreviations(loc2);
-    
-    // בדיקה עם הקיצורים המורחבים
-    if (loc1Expanded === loc2Expanded) return true;
-    if (loc1Expanded.includes(loc2Expanded) || loc2Expanded.includes(loc1Expanded)) return true;
-    
-    // בדיקה מיוחדת לנתב"ג - אם שני המקומות הם נתב"ג, נתעלם ממספר הטרמינל
-    const isBenGurion1 = loc1Expanded.includes('נתבג') || loc1Expanded.includes('נמל התעופה בן גוריון') || loc1Expanded.includes('שדה תעופה בן גוריון') || loc1Expanded.toLowerCase().includes('airport');
-    const isBenGurion2 = loc2Expanded.includes('נתבג') || loc2Expanded.includes('נמל התעופה בן גוריון') || loc2Expanded.includes('שדה תעופה בן גוריון') || loc2Expanded.toLowerCase().includes('airport');
-    if (isBenGurion1 && isBenGurion2) {
-      // אם שניהם נתב"ג, נסיר מספרי טרמינלים ונשווה רק את שדה התעופה
-      // נסיר רק "טרמינל X" או "Terminal X" או "Termin X" (X = מספר)
-      const loc1NoTerminal = loc1Expanded.replace(/\s*[טת]?רמינל\s*\d+/gi, ' טרמינל').replace(/\s*Terminal\s*\d+/gi, ' טרמינל').replace(/\s*Termin\s*\d+/gi, ' טרמינל');
-      const loc2NoTerminal = loc2Expanded.replace(/\s*[טת]?רמינל\s*\d+/gi, ' טרמינל').replace(/\s*Terminal\s*\d+/gi, ' טרמינל').replace(/\s*Termin\s*\d+/gi, ' טרמינל');
-      // נבדוק אם שניהם מכילים "נתבג" או "נמל התעופה בן גוריון" או "שדה תעופה בן גוריון" או "Airport"
-      const hasAirport1 = loc1NoTerminal.includes('נתבג') || loc1NoTerminal.includes('נמל התעופה בן גוריון') || loc1NoTerminal.includes('שדה תעופה בן גוריון') || loc1NoTerminal.toLowerCase().includes('airport');
-      const hasAirport2 = loc2NoTerminal.includes('נתבג') || loc2NoTerminal.includes('נמל התעופה בן גוריון') || loc2NoTerminal.includes('שדה תעופה בן גוריון') || loc2NoTerminal.toLowerCase().includes('airport');
-      if (hasAirport1 && hasAirport2) {
-        return true; // שניהם נתב"ג, התאמה!
-      }
-    }
-    
-    // טיפול בהבדלים קטנים במספרי בתים - נסיר מספרים ונשווה רק את שמות הרחובות
-    const removeNumbers = (loc) => {
-      // נסיר כל המספרים מהמחרוזת
-      return loc.replace(/\d+/g, '').replace(/\s+/g, ' ').replace(/,\s*,/g, ',').replace(/,\s*$/g, '').trim();
-    };
-    
-    const loc1NoNumbers = removeNumbers(loc1Expanded);
-    const loc2NoNumbers = removeNumbers(loc2Expanded);
-    
-    // אם אחרי הסרת המספרים יש התאמה, נשתמש בזה
-    if (loc1NoNumbers && loc2NoNumbers) {
-      // בדיקה אם הם זהים (בדיוק או אחד מכיל את השני)
-      if (loc1NoNumbers === loc2NoNumbers || loc1NoNumbers.includes(loc2NoNumbers) || loc2NoNumbers.includes(loc1NoNumbers)) {
-        return true;
-      }
-      // בדיקה לפי מילים - אם יש מילה משותפת משמעותית (כמו שם עיר), נשתמש בזה
-      // זה מאפשר התאמה גם אם שמות הרחובות קצת שונים אבל העיר/האזור זהים
-      const words1NoNumbers = loc1NoNumbers.split(/[,;\s-]+/).filter(w => w && w.length > 1);
-      const words2NoNumbers = loc2NoNumbers.split(/[,;\s-]+/).filter(w => w && w.length > 1);
-      // נבדוק אם יש לפחות מילה משותפת אחת משמעותית (יותר מ-2 תווים)
-      const commonWords = words1NoNumbers.filter(w => w.length > 2 && words2NoNumbers.includes(w));
-      if (commonWords.length > 0) {
-        return true;
-      }
-    }
-    
-    // בדיקה לפי מילים - אם כל המילים ב-loc1 קיימות ב-loc2 ולהפך
-    const words1 = loc1Expanded.split(/[,;\s-]+/).filter(w => w && w.length > 1);
-    const words2 = loc2Expanded.split(/[,;\s-]+/).filter(w => w && w.length > 1);
-    
-    // נסיר מספרים מהמילים ונשווה רק את שמות הרחובות
-    const words1NoNumbers = words1.map(w => w.replace(/\d+/g, '').trim()).filter(w => w && w.length > 1);
-    const words2NoNumbers = words2.map(w => w.replace(/\d+/g, '').trim()).filter(w => w && w.length > 1);
-    
-    // בדיקה לפי מילים ללא מספרים - אם כל המילים מהמקום הקצר יותר קיימות במקום הארוך יותר
-    if (words1NoNumbers.length > 0 && words2NoNumbers.length > 0) {
-      const shorterWordsNoNumbers = words1NoNumbers.length <= words2NoNumbers.length ? words1NoNumbers : words2NoNumbers;
-      const longerLocNoNumbers = words1NoNumbers.length <= words2NoNumbers.length ? loc2NoNumbers : loc1NoNumbers;
-      const allShorterWordsInLongerNoNumbers = shorterWordsNoNumbers.every(word => longerLocNoNumbers.includes(word));
-      if (allShorterWordsInLongerNoNumbers && Math.abs(words1NoNumbers.length - words2NoNumbers.length) <= 2) {
-        return true;
-      }
-    }
-    
-    if (words1.length === 0 || words2.length === 0) return false;
-    
-    // כל המילים מהמקום הקצר יותר צריכות להיות במקום הארוך יותר
-    // זה מאפשר התאמה גם כאשר אחד מהמקומות מכיל פרטים נוספים
-    const shorterWords = words1.length <= words2.length ? words1 : words2;
-    const longerLoc = words1.length <= words2.length ? loc2Expanded : loc1Expanded;
-    const allShorterWordsInLonger = shorterWords.every(word => longerLoc.includes(word));
-    
-    // גם נבדוק שההבדל בכמות המילים לא גדול מדי (עד 6 מילים כדי לאפשר פרטים נוספים)
-    const wordCountDiff = Math.abs(words1.length - words2.length);
-    
-    return allShorterWordsInLonger && wordCountDiff <= 6;
-  };
-  
   const sourceMatch = locationsMatch(gettSourceNorm, rideSourceNorm);
-  
   const destMatch = locationsMatch(gettDestNorm, rideDestNorm);
   
-  if (!sourceMatch || !destMatch) {
+  return sourceMatch && destMatch;
+}
+
+/**
+ * בדיקת התאמת נוסעים בין נסיעת גט לנסיעת רייד
+ * @param {Object} ride - נסיעת רייד
+ * @param {Object} gettRide - נסיעת גט
+ * @param {Map} employeeMap - מפה של עובדים
+ * @param {Function} hasCommonPassenger - פונקציה לבדיקת נוסעים משותפים
+ * @returns {boolean} true אם יש לפחות נוסע אחד משותף
+ */
+function checkPassengerMatch(ride, gettRide, employeeMap, hasCommonPassenger) {
+  const hasCommon = hasCommonPassenger(ride.pids, gettRide.passengers, employeeMap);
+  // אם אין נוסעים משותפים ויש נוסעים ברייד, אין התאמה
+  if (!hasCommon && ride.pids.length > 0) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * בדיקת התאמה בין נסיעת גט לנסיעת רייד
+ * קריטריונים: הפרש זמן ≤ 10 דקות, מקור/יעד זהים, לפחות נוסע אחד זהה
+ * @param {Object} gettRide - נסיעת גט
+ * @param {Object} ride - נסיעת רייד
+ * @param {Function} parseDateTime - פונקציה לפרסור תאריכים
+ * @param {Function} hasCommonPassenger - פונקציה לבדיקת נוסעים משותפים
+ * @param {Function} normalizeGettLocation - פונקציה לנרמול מיקומים
+ * @param {Map} employeeMap - מפה של עובדים
+ * @returns {boolean} true אם כל הקריטריונים מתקיימים
+ */
+function checkRideMatch(gettRide, ride, parseDateTime, hasCommonPassenger, normalizeGettLocation, employeeMap) {
+  // 1. פרסור תאריכים
+  const gettDate = parseGettDateTime(gettRide, parseDateTime);
+  if (!gettDate) {
     return false;
   }
   
-  // 3. לפחות נוסע אחד משותף
-  const hasCommon = hasCommonPassenger(ride.pids, gettRide.passengers, employeeMap);
+  const rideDateObj = parseRideDateTime(ride, parseDateTime);
+  if (!rideDateObj) {
+    return false;
+  }
   
-  if (!hasCommon && ride.pids.length > 0) {
+  // 2. בדיקת מיקומים - מקור ויעד זהים
+  const locationMatch = checkLocationMatch(gettRide, ride, normalizeGettLocation);
+  if (!locationMatch) {
+    return false;
+  }
+  
+  // 3. בדיקת נוסעים - לפחות נוסע אחד משותף
+  const passengerMatch = checkPassengerMatch(ride, gettRide, employeeMap, hasCommonPassenger);
+  if (!passengerMatch) {
+    return false;
+  }
+  
+  // 4. בדיקת זמן - הפרש זמן ≤ 10 דקות
+  const timeMatch = checkTimeMatch(gettDate, rideDateObj, 10);
+  if (!timeMatch) {
     return false;
   }
   
@@ -811,241 +892,163 @@ function checkRideMatch(gettRide, ride, parseDateTime, hasCommonPassenger, norma
 }
 
 /**
- * התאמת גט עם רייד (התאמה חכמה לפי חודש)
- * לוגיקה: התאמה מקבילית מתחילת כל חודש - נסיעה 1 של גט עם נסיעה 1 של רייד, וכו'
- * קריטריונים: הפרש זמן ≤ 30 דקות, מקור/יעד זהה, לפחות נוסע אחד זהה
- * @param {Array} gettData - מערך של נסיעות גט
+ * יצירת מפת נסיעות לפי תאריך (רק יום, ללא שעה) לייעול החיפוש
  * @param {Array} rides - מערך של נסיעות רייד
- * @param {Map|null} employeeMap - מפה של עובדים (אופציונלי)
- * @returns {Array} מערך של התאמות
+ * @param {Function} parseDateTime - פונקציה לפרסור תאריכים
+ * @returns {Map<string, Array>} מפה של נסיעות לפי מפתח תאריך (YYYY-MM-DD)
  */
-export function matchGettToRides(gettData, rides, employeeMap = null) {
-  
-  const matches = [];
-  const matchedRideIds = new Set();
-  
-  // מיון כרונולוגי של נסיעות גט
-  const sortedGett = sortChronologically(
-    gettData,
-    (g) => g.date,
-    (g) => g.time || ''
-  );
-  // מיון כרונולוגי של נסיעות רייד
-  const sortedRides = sortChronologically(
-    rides,
-    (r) => {
-      const parts = r.date.split(' ');
-      return parts[0] || r.date;
-    },
-    (r) => {
-      const parts = r.date.split(' ');
-      return parts[1] || '';
-    }
-  );
-  // רק נסיעות רייד ששייכות לגט
-  const gettSupplierNames = ['gett', 'גט', 'GETT'];
-  const gettRides = sortedRides.filter(ride => {
-    if (!ride.supplier) return false;
-    const rideSupplier = (ride.supplier || '').trim().toLowerCase();
-    return gettSupplierNames.some(pattern => {
-      const patternLower = pattern.toLowerCase();
-      return rideSupplier.includes(patternLower) || 
-             patternLower.includes(rideSupplier) ||
-             rideSupplier === patternLower;
-    });
-  });
-  // קיבוץ נסיעות לפי חודש
-  const gettByMonth = groupRidesByMonth(
-    sortedGett,
-    (g) => g.date,
-    (g) => g.time || ''
-  );
-  
-  // קיבוץ כל נסיעות הרייד לפי חודש (לא רק נסיעות גט)
-  // כדי למצוא נסיעות שגט הגיש אבל ברייד מופיעות תחת ספק אחר
-  const allRidesByMonth = groupRidesByMonth(
-    sortedRides,
-    (r) => {
-      const parts = r.date.split(' ');
-      return parts[0] || r.date;
-    },
-    (r) => {
-      const parts = r.date.split(' ');
-      return parts[1] || '';
-    }
-  );
-  
-  // נשמור גם את gettRides לפי חודש לשימוש בסוף (עבור missing_in_supplier)
-  const ridesByMonth = groupRidesByMonth(
-    gettRides,
-    (r) => {
-      const parts = r.date.split(' ');
-      return parts[0] || r.date;
-    },
-    (r) => {
-      const parts = r.date.split(' ');
-      return parts[1] || '';
-    }
-  );
-  
-  // עבור כל חודש
-  for (const [monthKey, gettMonthRides] of gettByMonth.entries()) {
-    // נחפש בכל נסיעות הרייד בחודש זה (לא רק נסיעות גט)
-    const rideMonthRides = allRidesByMonth.get(monthKey) || [];
+function buildRidesByDateMap(rides, parseDateTime) {
+  const ridesByDate = new Map();
+  for (const ride of rides) {
+    const rideDateTime = ride.date;
+    const rideTime = rideDateTime.includes(' ') ? rideDateTime.split(' ')[1] : '';
+    const rideDate = rideDateTime.split(' ')[0];
+    const rideDateObj = parseDateTime(rideDate, rideTime);
     
-    // Set של אינדקסים של נסיעות רייד שכבר הותאמו בחודש זה
-    const matchedRideIndices = new Set();
-    
-    // עבור כל נסיעת גט בחודש (בסדר כרונולוגי)
-    let monthMatches = 0;
-    let monthMissing = 0;
-    for (let i = 0; i < gettMonthRides.length; i++) {
-      const gett = gettMonthRides[i];
-    const gettDate = parseDateTime(gett.date, gett.time || '');
-      const gettOrderNumberStr = String(gett.orderNumber || '');
+    if (rideDateObj) {
+      // מפתח: YYYY-MM-DD (רק תאריך, ללא שעה)
+      const dateKey = `${rideDateObj.getFullYear()}-${String(rideDateObj.getMonth() + 1).padStart(2, '0')}-${String(rideDateObj.getDate()).padStart(2, '0')}`;
       
-      if (!gettDate) {
-      matches.push({
-        supplier: 'gett',
-        supplierData: gett,
-        ride: null,
-        status: 'missing_in_ride',
-        priceDifference: null,
-        matchConfidence: 0
-      });
-        monthMissing++;
-        continue;
+      if (!ridesByDate.has(dateKey)) {
+        ridesByDate.set(dateKey, []);
       }
-      
-      let matchedRide = null;
-      let matchedIndex = -1;
-      let bestTimeDiff = Infinity;
-      
-      // חיפוש בכל נסיעות החודש (לא רק באינדקס i), תוך עדיפות לנסיעות קרובות יותר בזמן
-      // נחפש תחילה קרוב לאינדקס i, ואז נחפש בשאר הרשימה
-      const searchOrder = [];
-      
-      // ראשית, נחפש מאינדקס i והלאה
-      for (let idx = i; idx < rideMonthRides.length; idx++) {
-        if (!matchedRideIndices.has(idx)) {
-          searchOrder.push(idx);
-        }
-      }
-      
-      // אם אין מספיק, נחפש גם לפני אינדקס i
-      for (let idx = 0; idx < i && idx < rideMonthRides.length; idx++) {
-        if (!matchedRideIndices.has(idx)) {
-          searchOrder.push(idx);
-        }
-      }
-      
-      // מיון לפי הפרש זמן (עדיפות לנסיעות קרובות יותר בזמן)
-      if (gettDate) {
-        searchOrder.sort((a, b) => {
-          const rideA = rideMonthRides[a];
-          const rideB = rideMonthRides[b];
-          const rideADateTime = rideA.date;
-          const rideBDateTime = rideB.date;
-          const rideATime = rideADateTime.includes(' ') ? rideADateTime.split(' ')[1] : '';
-          const rideBTime = rideBDateTime.includes(' ') ? rideBDateTime.split(' ')[1] : '';
-          const rideADate = rideADateTime.split(' ')[0];
-          const rideBDate = rideBDateTime.split(' ')[0];
-          const rideADateObj = parseDateTime(rideADate, rideATime);
-          const rideBDateObj = parseDateTime(rideBDate, rideBTime);
-          
-          if (!rideADateObj) return 1;
-          if (!rideBDateObj) return -1;
-          
-          const timeDiffA = Math.abs(rideADateObj.getTime() - gettDate.getTime());
-          const timeDiffB = Math.abs(rideBDateObj.getTime() - gettDate.getTime());
-          
-          return timeDiffA - timeDiffB;
-        });
-      } else {
-        // אם לא הצלחנו לפרסר את התאריך של גט, נשתמש במיון לפי index
-        searchOrder.sort((a, b) => Math.abs(a - i) - Math.abs(b - i));
-      }
-      
-      // נחפש בכל הנסיעות, אבל נעדיף את הקרובות ביותר בזמן
-      for (const rideIdx of searchOrder) {
-        const ride = rideMonthRides[rideIdx];
-      const rideDateTime = ride.date;
-      const rideTime = rideDateTime.includes(' ') ? rideDateTime.split(' ')[1] : '';
-      const rideDate = rideDateTime.split(' ')[0];
-        const hasRideTime = rideDateTime.includes(' ') && rideTime.trim() !== '';
-      const rideDateObj = parseDateTime(rideDate, rideTime);
-      
-        if (!rideDateObj) continue;
-        
-        const timeDiff = Math.abs(rideDateObj.getTime() - gettDate.getTime()) / (1000 * 60);
-        
-        // אם אין שעה ברייד, נבדוק אם זה אותו יום (אז נחשיב את ההפרש כ-0 לצורך סינון)
-        // אחרת, אם יש שעה, נשתמש בהפרש הזמן הרגיל
-        const effectiveTimeDiff = !hasRideTime ? 0 : timeDiff;
-        
-        // אם כבר מצאנו התאמה עם הפרש זמן קטן יותר, נדלג על זו
-        if (effectiveTimeDiff >= bestTimeDiff) continue;
-        
-        const checkRideMatchResult = checkRideMatch(gett, ride, parseDateTime, hasCommonPassenger, normalizeGettLocation, employeeMap);
-        if (checkRideMatchResult) {
-          matchedRide = ride;
-          matchedIndex = rideIdx;
-          // אם אין שעה ברייד, נשתמש ב-0 כדי שלא נדלג על נסיעות אחרות באותו יום
-          bestTimeDiff = !hasRideTime ? 0 : timeDiff;
-          
-          // אם מצאנו התאמה מושלמת (הפרש זמן קטן מאוד), נפסיק לחפש
-          if (timeDiff < 2) break;
-        }
-      }
-      
-      if (matchedRide) {
-        // בדיקה אם הנסיעה שייכת לגט לפי שם הספק
-        const rideSupplier = (matchedRide.supplier || '').trim().toLowerCase();
-        const belongsToGett = gettSupplierNames.some(pattern => {
-          const patternLower = pattern.toLowerCase();
-          return rideSupplier.includes(patternLower) || 
-                 patternLower.includes(rideSupplier) ||
-                 rideSupplier === patternLower;
-        });
-        
-        // אם הנסיעה לא שייכת לגט, זה אומר שגט הגיש את הנסיעה אבל ברייד היא מופיעה תחת ספק אחר
-        // שלב 1: התאמה - הסטטוס נקבע רק לפי התאמה, לא לפי מחיר
-        const status = belongsToGett ? 'matched' : 'performed_by_other_supplier';
-        
-        // שלב 2: חישוב הפרש מחיר (מידע נוסף, לא משנה את הסטטוס)
-        const ridePrice = matchedRide.price || 0;
-        const gettPrice = gett.price || 0;
-        const priceDiff = Math.abs(ridePrice - gettPrice);
-        
-      matches.push({
-        supplier: 'gett',
-        supplierData: gett,
-          ride: matchedRide,
-          status: status, // נשאר 'matched' גם אם יש הפרש מחיר
-        priceDifference: priceDiff, // הפרש המחיר הוא מידע נוסף
-        matchConfidence: 1.0
-      });
-        matchedRideIds.add(matchedRide.rideId);
-        matchedRideIndices.add(matchedIndex);
-        monthMatches++;
-    } else {
-      // יש בגט אבל אין ברייד
-      matches.push({
-        supplier: 'gett',
-        supplierData: gett,
-        ride: null,
-        status: 'missing_in_ride',
-        priceDifference: null,
-        matchConfidence: 0
-      });
-        monthMissing++;
+      ridesByDate.get(dateKey).push(ride);
     }
+  }
+  return ridesByDate;
+}
+
+/**
+ * מציאת נסיעות מועמדות לפי תאריך (יום לפני, אותו יום, יום אחרי)
+ * @param {Date} gettDate - תאריך נסיעת גט
+ * @param {Map<string, Array>} ridesByDate - מפה של נסיעות לפי תאריך
+ * @param {number} dayRange - טווח ימים לחיפוש (ברירת מחדל: 1)
+ * @returns {Array} מערך של נסיעות מועמדות
+ */
+function findCandidateRides(gettDate, ridesByDate, dayRange = 1) {
+  const candidateRides = [];
+  for (let dayOffset = -dayRange; dayOffset <= dayRange; dayOffset++) {
+    const checkDate = new Date(gettDate);
+    checkDate.setDate(checkDate.getDate() + dayOffset);
+    const checkDateKey = `${checkDate.getFullYear()}-${String(checkDate.getMonth() + 1).padStart(2, '0')}-${String(checkDate.getDate()).padStart(2, '0')}`;
+    
+    if (ridesByDate.has(checkDateKey)) {
+      candidateRides.push(...ridesByDate.get(checkDateKey));
+    }
+  }
+  return candidateRides;
+}
+
+/**
+ * מציאת ההתאמה הטובה ביותר בין נסיעת גט לנסיעות מועמדות
+ * @param {Object} gettRide - נסיעת גט
+ * @param {Array} candidateRides - נסיעות מועמדות
+ * @param {Set} matchedRideIds - Set של ID-ים של נסיעות שכבר הותאמו
+ * @param {Function} parseDateTime - פונקציה לפרסור תאריכים
+ * @param {Function} checkRideMatch - פונקציה לבדיקת התאמה
+ * @param {Map|null} employeeMap - מפה של עובדים (אופציונלי)
+ * @param {number} maxSearchTimeDiff - הפרש זמן מקסימלי לחיפוש (בדקות)
+ * @param {number} perfectMatchTimeDiff - הפרש זמן להתאמה מושלמת (בדקות)
+ * @returns {Object|null} נסיעת רייד מותאמת או null
+ */
+function findBestGettMatch(gettRide, candidateRides, matchedRideIds, parseDateTime, checkRideMatch, employeeMap, maxSearchTimeDiff = GETT_MAX_SEARCH_TIME_DIFF_MINUTES, perfectMatchTimeDiff = GETT_PERFECT_MATCH_TIME_DIFF_MINUTES) {
+  const gettDate = parseDateTime(gettRide.date, gettRide.time || '');
+  if (!gettDate) {
+    return null;
+  }
+  
+  let matchedRide = null;
+  let bestTimeDiff = Infinity;
+  
+  for (const ride of candidateRides) {
+    // דילוג על נסיעות שכבר הותאמו
+    if (matchedRideIds.has(ride.rideId)) {
+      continue;
+    }
+    
+    // חילוץ תאריך ושעה מהנסיעה
+    const rideDateTime = ride.date;
+    const rideTime = rideDateTime.includes(' ') ? rideDateTime.split(' ')[1] : '';
+    const rideDate = rideDateTime.split(' ')[0];
+    const rideDateObj = parseDateTime(rideDate, rideTime);
+    
+    if (!rideDateObj) {
+      continue;
+    }
+    
+    // חישוב הפרש זמן
+    const timeDiff = Math.abs(rideDateObj.getTime() - gettDate.getTime()) / (1000 * 60);
+    
+    // אם הפרש הזמן גדול מהמקסימום, נדלג
+    if (timeDiff > maxSearchTimeDiff) {
+      continue;
+    }
+    
+    // בדיקת התאמה - צריך לבדוק לפני השוואת bestTimeDiff
+    // כי אם יש נסיעה עם הפרש זמן קטן יותר שלא עוברת את checkRideMatch,
+    // אנחנו עדיין רוצים לבדוק נסיעות אחרות שעוברות את checkRideMatch
+    const matchResult = checkRideMatch(gettRide, ride, parseDateTime, hasCommonPassenger, normalizeGettLocation, employeeMap);
+    
+    // אם לא עברה את checkRideMatch, נדלג
+    if (!matchResult) {
+      continue;
+    }
+    
+    // אם הפרש הזמן גדול יותר מהטוב ביותר הנוכחי, נדלג על זו
+    // אבל אם יש התאמה עם אותו הפרש זמן, נבדוק גם את זו כדי לבחור את הטובה ביותר
+    if (timeDiff > bestTimeDiff) {
+      continue;
+    }
+    
+    // עדכון ההתאמה הטובה ביותר אם הפרש הזמן קטן יותר או שווה
+    // אם יש שתי נסיעות עם אותו הפרש זמן, נבחר את הראשונה (הסדר ברשימה)
+    if (timeDiff <= bestTimeDiff) {
+      matchedRide = ride;
+      bestTimeDiff = timeDiff;
     }
   }
   
-  // הוספת נסיעות בריד שלא נמצאו בגט (יש ברייד אבל אין בספק)
-  let missingInSupplier = 0;
-  sortedRides.forEach(ride => {
+  return matchedRide;
+}
+
+/**
+ * יצירת אובייקט תוצאת התאמה
+ * @param {Object} gettRide - נסיעת גט
+ * @param {Object|null} ride - נסיעת רייד (או null אם לא נמצאה)
+ * @param {string} status - סטטוס ההתאמה
+ * @returns {Object} אובייקט תוצאת התאמה
+ */
+function createGettMatchResult(gettRide, ride, status) {
+  const result = {
+    supplier: 'gett',
+    supplierData: gettRide,
+    ride: ride,
+    status: status,
+    matchConfidence: status === 'matched' ? 1.0 : 0
+  };
+  
+  if (status === 'matched' && ride) {
+    const ridePrice = ride.price || 0;
+    const gettPrice = gettRide.price || 0;
+    result.priceDifference = Math.abs(ridePrice - gettPrice);
+  } else {
+    result.priceDifference = null;
+  }
+  
+  return result;
+}
+
+/**
+ * הוספת נסיעות רייד שלא נמצאו בגט (יש ברייד אבל אין בספק)
+ * @param {Array} rides - מערך של נסיעות רייד
+ * @param {Set} matchedRideIds - Set של ID-ים של נסיעות שכבר הותאמו
+ * @param {Array<string>} gettSupplierNames - שמות הספק גט
+ * @returns {Array} מערך של תוצאות התאמה לנסיעות חסרות
+ */
+function addMissingRideMatches(rides, matchedRideIds, gettSupplierNames) {
+  const missingMatches = [];
+  
+  for (const ride of rides) {
     if (!matchedRideIds.has(ride.rideId)) {
       // בדיקה אם הנסיעה שייכת לגט לפי שם הספק
       if (ride.supplier) {
@@ -1058,22 +1061,70 @@ export function matchGettToRides(gettData, rides, employeeMap = null) {
         });
         
         if (belongsToGett) {
-      matches.push({
-        supplier: 'gett',
-        supplierData: null,
-        ride: ride,
-        status: 'missing_in_supplier',
-        priceDifference: null,
-        matchConfidence: 0
-      });
-          missingInSupplier++;
+          missingMatches.push(createGettMatchResult(null, ride, 'missing_in_supplier'));
         }
       }
     }
-  });
+  }
   
-  const totalMatched = matches.filter(m => m.status === 'matched').length;
-  const totalMissingInRide = matches.filter(m => m.status === 'missing_in_ride').length;
+  return missingMatches;
+}
+
+/**
+ * התאמת גט עם רייד
+ * קריטריונים: הפרש זמן ≤ 10 דקות, מקור/יעד זהה, לפחות נוסע אחד זהה
+ * @param {Array} gettData - מערך של נסיעות גט
+ * @param {Array} rides - מערך של נסיעות רייד
+ * @param {Map|null} employeeMap - מפה של עובדים (אופציונלי)
+ * @returns {Array} מערך של התאמות
+ */
+export function matchGettToRides(gettData, rides, employeeMap = null) {
+  const matches = [];
+  const matchedRideIds = new Set();
+  const gettSupplierNames = GETT_SUPPLIER_NAMES;
+  
+  // יצירת מפה של נסיעות לפי תאריך
+  const ridesByDate = buildRidesByDateMap(rides, parseDateTime);
+  
+  // עבור כל נסיעת גט
+  for (const gettRide of gettData) {
+    // פרסור תאריך של נסיעת גט
+    const gettDate = parseDateTime(gettRide.date, gettRide.time || '');
+    
+    // אם אין תאריך תקין, נסיעת גט לא נמצאה ברייד
+    if (!gettDate) {
+      matches.push(createGettMatchResult(gettRide, null, 'missing_in_ride'));
+      continue;
+    }
+    
+    // מציאת נסיעות מועמדות
+    const candidateRides = findCandidateRides(gettDate, ridesByDate, GETT_DATE_SEARCH_RANGE_DAYS);
+    
+    // מציאת ההתאמה הטובה ביותר
+    const matchedRide = findBestGettMatch(
+      gettRide,
+      candidateRides,
+      matchedRideIds,
+      parseDateTime,
+      checkRideMatch,
+      employeeMap,
+      GETT_MAX_SEARCH_TIME_DIFF_MINUTES, // maxSearchTimeDiff
+      GETT_PERFECT_MATCH_TIME_DIFF_MINUTES   // perfectMatchTimeDiff
+    );
+    
+    // הוספת תוצאת ההתאמה
+    if (matchedRide) {
+      matches.push(createGettMatchResult(gettRide, matchedRide, 'matched'));
+      matchedRideIds.add(matchedRide.rideId);
+    } else {
+      // יש בגט אבל אין ברייד
+      matches.push(createGettMatchResult(gettRide, null, 'missing_in_ride'));
+    }
+  }
+  
+  // הוספת נסיעות רייד שלא נמצאו בגט
+  const missingMatches = addMissingRideMatches(rides, matchedRideIds, gettSupplierNames);
+  matches.push(...missingMatches);
   
   return matches;
 }
@@ -1120,9 +1171,11 @@ export function getStatusText(status) {
     'price_difference': '✗ הפרש מחיר',
     'missing_in_ride': '⚠️ חסר ברייד',
     'missing_in_supplier': '⚠️ חסר בספק',
-    'not_matched': '⚠️ לא מותאם',
-    'performed_by_other_supplier': '⚠️ בוצע על ידי ספק אחר'
+    'not_matched': '⚠️ לא מותאם'
   };
   
   return statusMap[status] || status;
 }
+
+
+
