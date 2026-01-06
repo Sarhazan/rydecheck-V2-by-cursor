@@ -91,11 +91,24 @@ function locationsMatch(loc1, loc2) {
   
   // נרמול נוסף - החלפת סימנים מיוחדים והסרת "ישראל"
   const normalizeForMatch = (str) => {
-    return str
+    let normalized = str
       .replace(/\bישראל\b/g, '') // הסרת "ישראל"
       .replace(/[\/\-,;]/g, ' ') // החלפת /, -, ,, ; ברווח
       .replace(/\s+/g, ' ') // רווחים מרובים לרווח אחד
       .trim();
+    
+    // תרגום "שדה תעופה בן גוריון" ל"נתבג" כדי שיתאים (גם עם טרמינל)
+    // טיפול במקרים: "שדה תעופה בן גוריון/טרמינל 3" -> "נתבג/טרמינל 3"
+    normalized = normalized.replace(/\bשדה תעופה בן גוריון\s*\/\s*/g, 'נתבג/');
+    normalized = normalized.replace(/\bשדה תעופה\s+בן גוריון\s*\/\s*/g, 'נתבג/');
+    // גם "שדה תעופה בן גוריון - טרמינל" -> "נתבג - טרמינל"
+    normalized = normalized.replace(/\bשדה תעופה בן גוריון\s*-\s*/g, 'נתבג - ');
+    normalized = normalized.replace(/\bשדה תעופה\s+בן גוריון\s*-\s*/g, 'נתבג - ');
+    // גם "שדה תעופה בן גוריון" (ללא טרמינל) -> "נתבג"
+    normalized = normalized.replace(/\bשדה תעופה בן גוריון\b/g, 'נתבג');
+    normalized = normalized.replace(/\bשדה תעופה\s+בן גוריון\b/g, 'נתבג');
+    
+    return normalized;
   };
   
   const norm1 = normalizeForMatch(loc1);
@@ -351,15 +364,98 @@ export function matchBontourToRides(bontourData, rides) {
  */
 export function matchHoriToRides(horiData, rides) {
   const matches = [];
-  const rideMap = new Map(rides.map(r => [r.rideId, r]));
+  // יצירת מפה עם שני מפתחות - גם כמספר וגם כמחרוזת
+  const rideMap = new Map();
+  rides.forEach(r => {
+    rideMap.set(r.rideId, r);
+    // גם כמחרוזת למקרה ש-tripNumber הוא מחרוזת
+    if (typeof r.rideId === 'number') {
+      rideMap.set(String(r.rideId), r);
+    } else if (typeof r.rideId === 'string') {
+      const numId = parseInt(r.rideId);
+      if (!isNaN(numId)) {
+        rideMap.set(numId, r);
+      }
+    }
+  });
   const matchedRideIds = new Set();
   
   // עוברים על כל נסיעות חורי (הספק הגיש לרייד)
   horiData.forEach(hori => {
     const rideId = hori.tripNumber;
-    const ride = rideMap.get(rideId);
     
-    if (!ride) {
+    // בדיקה אם tripNumber תקין לפני חיפוש
+    // מסננים: null, undefined, NaN, 0, מחרוזת ריקה, או כל ערך לא תקין
+    const isValidTripNumber = rideId !== null && 
+                              rideId !== undefined && 
+                              rideId !== '' && 
+                              !isNaN(rideId) && 
+                              rideId !== 0 &&
+                              (typeof rideId === 'number' || (typeof rideId === 'string' && rideId.trim().length > 0 && !isNaN(parseInt(rideId))));
+    
+    let matchedRide = null;
+    let matchConfidence = 1.0;
+    
+    if (isValidTripNumber) {
+      // ניסיון התאמה לפי tripNumber - ננסה גם כמספר וגם כמחרוזת
+      matchedRide = rideMap.get(rideId);
+      if (!matchedRide) {
+        // ננסה כמספר אם rideId הוא מחרוזת
+        if (typeof rideId === 'string') {
+          const numId = parseInt(rideId);
+          if (!isNaN(numId)) {
+            matchedRide = rideMap.get(numId);
+          }
+        } else if (typeof rideId === 'number') {
+          // ננסה כמחרוזת אם rideId הוא מספר
+          matchedRide = rideMap.get(String(rideId));
+        }
+      }
+    }
+    
+    // אם לא נמצא לפי tripNumber, ננסה התאמה לפי תאריך ומחיר 100 (רק לנסיעות עם מחיר 100)
+    if (!matchedRide && hori.price === 100) {
+      // חיפוש נסיעות ברייד עם מחיר 100 באותו תאריך
+      const horiDate = hori.date;
+      const normalizeDate = (dateStr) => {
+        if (!dateStr) return '';
+        // הסרת זמן אם יש
+        const dateOnly = dateStr.split(' ')[0];
+        return dateOnly.trim();
+      };
+      
+      const horiDateNorm = normalizeDate(horiDate);
+      
+      const candidateRides = rides.filter(ride => {
+        // בדיקה אם הנסיעה כבר הותאמה
+        if (matchedRideIds.has(ride.rideId)) {
+          return false;
+        }
+        
+        // בדיקת מחיר
+        if (Math.abs(ride.price - 100) > 0.01) {
+          return false;
+        }
+        
+        // בדיקת תאריך (אם יש)
+        if (horiDateNorm && ride.date) {
+          const rideDateNorm = normalizeDate(ride.date);
+          if (rideDateNorm && horiDateNorm !== rideDateNorm) {
+            return false;
+          }
+        }
+        
+        return true;
+      });
+      
+      // אם יש רק מועמד אחד, נבחר אותו
+      if (candidateRides.length === 1) {
+        matchedRide = candidateRides[0];
+        matchConfidence = 0.8; // ביטחון נמוך יותר אם התאמנו לפי תאריך
+      }
+    }
+    
+    if (!matchedRide) {
       // יש בחורי אבל אין ברייד
       matches.push({
         supplier: 'hori',
@@ -373,19 +469,19 @@ export function matchHoriToRides(horiData, rides) {
     }
     
     // בדיקת ID ומחיר בלבד
-    const priceDiff = Math.abs(ride.price - hori.price);
+    const priceDiff = Math.abs(matchedRide.price - hori.price);
     const hasPriceDifference = priceDiff > 0.01;
     
     matches.push({
       supplier: 'hori',
       supplierData: hori,
-      ride: ride,
+      ride: matchedRide,
       status: hasPriceDifference ? 'price_difference' : 'matched',
       priceDifference: priceDiff,
-      matchConfidence: 1.0
+      matchConfidence: matchConfidence
     });
     
-    matchedRideIds.add(rideId);
+    matchedRideIds.add(matchedRide.rideId);
   });
   
   // הוספת נסיעות בריד שלא נמצאו בחורי (יש ברייד אבל אין בספק)
@@ -726,8 +822,12 @@ function expandAbbreviations(loc) {
   if (!loc) return '';
   let expanded = loc;
   
-  // "נתבג" -> "שדה תעופה בן גוריון"
-  expanded = expanded.replace(/(^|\s)נתבג(\s|$|,|-)/g, '$1שדה תעופה בן גוריון$2');
+  // "נתבג" -> "שדה תעופה בן גוריון" (גם עם טרמינל)
+  // נתבג - טרמינל -> שדה תעופה בן גוריון - טרמינל
+  expanded = expanded.replace(/(^|\s)נתבג\s*-\s*/g, '$1שדה תעופה בן גוריון - ');
+  // נתבג/טרמינל -> שדה תעופה בן גוריון/טרמינל
+  expanded = expanded.replace(/(^|\s)נתבג\s*\/\s*/g, '$1שדה תעופה בן גוריון/');
+  expanded = expanded.replace(/(^|\s)נתבג(\s|$|,)/g, '$1שדה תעופה בן גוריון$2');
   
   // "בן גוריון" -> "שדה תעופה בן גוריון" רק אם זה באמת שדה תעופה
   // לא נתרגם אם יש מספר אחרי "בן גוריון" (כמו "בן גוריון 3" = רחוב)
@@ -933,7 +1033,8 @@ function findCandidateRides(gettDate, ridesByDate, dayRange = 1) {
     const checkDateKey = `${checkDate.getFullYear()}-${String(checkDate.getMonth() + 1).padStart(2, '0')}-${String(checkDate.getDate()).padStart(2, '0')}`;
     
     if (ridesByDate.has(checkDateKey)) {
-      candidateRides.push(...ridesByDate.get(checkDateKey));
+      const ridesForDate = ridesByDate.get(checkDateKey);
+      candidateRides.push(...ridesForDate);
     }
   }
   return candidateRides;
@@ -957,12 +1058,41 @@ function findBestGettMatch(gettRide, candidateRides, matchedRideIds, parseDateTi
     return null;
   }
   
+  const gettOrderNumber = gettRide.orderNumber || gettRide.orderId;
+  const gettOrderNumberStr = gettOrderNumber ? String(gettOrderNumber).trim() : null;
+  
   let matchedRide = null;
   let bestTimeDiff = Infinity;
+  let hasOrderNumberMatch = false; // האם יש התאמה לפי מספר הזמנה
   
   for (const ride of candidateRides) {
     // דילוג על נסיעות שכבר הותאמו
     if (matchedRideIds.has(ride.rideId)) {
+      continue;
+    }
+    
+    // בדיקה אם יש התאמה לפי מספר הזמנה של גט
+    // נבדוק בשדות שונים בנסיעת הרייד
+    const rideOrderNumber = ride.supplierOrderNumber || ride.orderNumber || ride.orderId;
+    const orderNumberMatch = gettOrderNumber && rideOrderNumber && 
+                             String(gettOrderNumber).trim() === String(rideOrderNumber).trim();
+    
+    // אם יש התאמה לפי מספר הזמנה, זה עדיפות גבוהה מאוד
+    // אבל עדיין צריך לבדוק את שאר הקריטריונים (מיקום, נוסעים, זמן)
+    if (orderNumberMatch && !hasOrderNumberMatch) {
+      // אם יש התאמה לפי מספר הזמנה, נבדוק את שאר הקריטריונים
+      const matchResult = checkRideMatch(gettRide, ride, parseDateTime, hasCommonPassenger, normalizeGettLocation, employeeMap);
+      if (matchResult) {
+        // אם כל הקריטריונים מתקיימים, זו התאמה מושלמת
+        matchedRide = ride;
+        hasOrderNumberMatch = true;
+        // נמשיך לחפש התאמות אחרות לפי מספר הזמנה, אבל רק אם הן טובות יותר
+        continue;
+      }
+    }
+    
+    // אם כבר יש התאמה לפי מספר הזמנה, נדלג על נסיעות ללא התאמה לפי מספר הזמנה
+    if (hasOrderNumberMatch && !orderNumberMatch) {
       continue;
     }
     
@@ -991,6 +1121,21 @@ function findBestGettMatch(gettRide, candidateRides, matchedRideIds, parseDateTi
     
     // אם לא עברה את checkRideMatch, נדלג
     if (!matchResult) {
+      continue;
+    }
+    
+    // אם יש התאמה לפי מספר הזמנה, זו עדיפות גבוהה
+    if (orderNumberMatch) {
+      if (!hasOrderNumberMatch || timeDiff < bestTimeDiff) {
+        matchedRide = ride;
+        bestTimeDiff = timeDiff;
+        hasOrderNumberMatch = true;
+      }
+      continue;
+    }
+    
+    // אם כבר יש התאמה לפי מספר הזמנה, נדלג על נסיעות ללא התאמה לפי מספר הזמנה
+    if (hasOrderNumberMatch) {
       continue;
     }
     
@@ -1086,8 +1231,34 @@ export function matchGettToRides(gettData, rides, employeeMap = null) {
   // יצירת מפה של נסיעות לפי תאריך
   const ridesByDate = buildRidesByDateMap(rides, parseDateTime);
   
+  // יצירת מפה של נסיעות לפי מספר הזמנה של גט (אם קיים)
+  const ridesByGettOrderNumber = new Map();
+  for (const ride of rides) {
+    const orderNumber = ride.supplierOrderNumber || ride.orderNumber || ride.orderId;
+    if (orderNumber) {
+      const orderNumberStr = String(orderNumber).trim();
+      if (!ridesByGettOrderNumber.has(orderNumberStr)) {
+        ridesByGettOrderNumber.set(orderNumberStr, []);
+      }
+      ridesByGettOrderNumber.get(orderNumberStr).push(ride);
+    }
+  }
+  
+  // עבור כל נסיעת גט - מיון לפי מספר הזמנה (אם יש) כדי לתת עדיפות לנסיעות עם מספר הזמנה
+  const sortedGettData = [...gettData].sort((a, b) => {
+    const aHasOrderNumber = !!(a.orderNumber || a.orderId);
+    const bHasOrderNumber = !!(b.orderNumber || b.orderId);
+    // נסיעות עם מספר הזמנה קודם
+    if (aHasOrderNumber && !bHasOrderNumber) return -1;
+    if (!aHasOrderNumber && bHasOrderNumber) return 1;
+    return 0;
+  });
+  
   // עבור כל נסיעת גט
-  for (const gettRide of gettData) {
+  for (const gettRide of sortedGettData) {
+    const gettOrderNumber = gettRide.orderNumber || gettRide.orderId;
+    const gettOrderNumberStr = gettOrderNumber ? String(gettOrderNumber).trim() : null;
+    
     // פרסור תאריך של נסיעת גט
     const gettDate = parseDateTime(gettRide.date, gettRide.time || '');
     
@@ -1097,20 +1268,63 @@ export function matchGettToRides(gettData, rides, employeeMap = null) {
       continue;
     }
     
-    // מציאת נסיעות מועמדות
-    const candidateRides = findCandidateRides(gettDate, ridesByDate, GETT_DATE_SEARCH_RANGE_DAYS);
+    let matchedRide = null;
     
-    // מציאת ההתאמה הטובה ביותר
-    const matchedRide = findBestGettMatch(
-      gettRide,
-      candidateRides,
-      matchedRideIds,
-      parseDateTime,
-      checkRideMatch,
-      employeeMap,
-      GETT_MAX_SEARCH_TIME_DIFF_MINUTES, // maxSearchTimeDiff
-      GETT_PERFECT_MATCH_TIME_DIFF_MINUTES   // perfectMatchTimeDiff
-    );
+    // קודם כל, נבדוק אם יש נסיעת רייד עם מספר הזמנה של גט
+    // אם יש מספר הזמנה, נחפש את הנסיעה גם אם היא כבר הותאמה (כדי לתת עדיפות)
+    if (gettOrderNumberStr && ridesByGettOrderNumber.has(gettOrderNumberStr)) {
+      const ridesWithOrderNumber = ridesByGettOrderNumber.get(gettOrderNumberStr);
+      // נבדוק את כל הנסיעות עם מספר הזמנה הזה
+      for (const ride of ridesWithOrderNumber) {
+        // אם הנסיעה כבר הותאמה, נבדוק אם היא הותאמה לנסיעת גט אחרת
+        // אם כן, נשחרר אותה ונעדכן את ההתאמה הישנה
+        if (matchedRideIds.has(ride.rideId)) {
+          // אם יש מספר הזמנה של גט, נשחרר את הנסיעה מההתאמה הישנה ונעדכן אותה
+          // נחפש את ההתאמה הישנה ונעדכן אותה
+          const oldMatchIndex = matches.findIndex(m => 
+            m.ride && m.ride.rideId === ride.rideId && 
+            m.status === 'matched' &&
+            m.supplierData &&
+            (m.supplierData.orderNumber !== gettOrderNumberStr && m.supplierData.orderId !== gettOrderNumberStr)
+          );
+          
+          if (oldMatchIndex !== -1) {
+            // עדכון ההתאמה הישנה ל-missing_in_ride
+            matches[oldMatchIndex] = createGettMatchResult(matches[oldMatchIndex].supplierData, null, 'missing_in_ride');
+            // הסרת הנסיעה מה-matchedRideIds כדי שנוכל להתאים אותה מחדש
+            matchedRideIds.delete(ride.rideId);
+          } else {
+            // אם לא מצאנו התאמה ישנה, נדלג על הנסיעה
+            continue;
+          }
+        }
+        
+        // בדיקת התאמה - אם יש מספר הזמנה, נבדוק את שאר הקריטריונים
+        const matchResult = checkRideMatch(gettRide, ride, parseDateTime, hasCommonPassenger, normalizeGettLocation, employeeMap);
+        if (matchResult) {
+          matchedRide = ride;
+          break; // מצאנו התאמה לפי מספר הזמנה
+        }
+      }
+    }
+    
+    // אם לא מצאנו התאמה לפי מספר הזמנה, נחפש התאמה רגילה
+    if (!matchedRide) {
+      // מציאת נסיעות מועמדות
+      const candidateRides = findCandidateRides(gettDate, ridesByDate, GETT_DATE_SEARCH_RANGE_DAYS);
+      
+      // מציאת ההתאמה הטובה ביותר
+      matchedRide = findBestGettMatch(
+        gettRide,
+        candidateRides,
+        matchedRideIds,
+        parseDateTime,
+        checkRideMatch,
+        employeeMap,
+        GETT_MAX_SEARCH_TIME_DIFF_MINUTES, // maxSearchTimeDiff
+        GETT_PERFECT_MATCH_TIME_DIFF_MINUTES   // perfectMatchTimeDiff
+      );
+    }
     
     // הוספת תוצאת ההתאמה
     if (matchedRide) {

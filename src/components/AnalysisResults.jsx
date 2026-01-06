@@ -15,7 +15,7 @@ import { useFilteredResults } from './AnalysisResults/hooks/useFilteredResults';
 import { logActivity, getAllActivities } from '../utils/activityLogger';
 
 // Icons
-import { CheckCircle2, AlertCircle, XCircle, TrendingUp, DollarSign, Users, FileX, Plus, Edit2, Check, X, ArrowUp, ArrowDown } from 'lucide-react';
+import { CheckCircle2, AlertCircle, XCircle, TrendingUp, DollarSign, Users, FileX, Plus, Edit2, Check, X, ArrowUp, ArrowDown, Download } from 'lucide-react';
 
 /**
  * קומפוננטה להצגת תוצאות ניתוח התאמות בין נסיעות רייד לספקים
@@ -564,7 +564,7 @@ const AnalysisResults = memo(function AnalysisResults({ matchResults, employeeMa
             <div className="text-sm text-gray-700 font-medium truncate">סכום הפרשי מחיר</div>
               </div>
           <div className="text-3xl font-bold text-blue-600 truncate">
-                ₪{Math.round(summary.totalPriceDiff).toLocaleString()}
+                ₪{Math.round(summary.totalPriceDiff || 0).toLocaleString('he-IL', { maximumFractionDigits: 0, minimumFractionDigits: 0 })}
               </div>
             </motion.div>
         
@@ -655,6 +655,27 @@ const AnalysisResults = memo(function AnalysisResults({ matchResults, employeeMa
           </>
         )}
         
+        {/* כפתור ייצוא - רק עבור missing_in_supplier */}
+        {statusFilter === 'missing_in_supplier' && currentResults.length > 0 && (
+          <motion.button
+            onClick={() => {
+              // טעינה דינמית של excelExporter
+              import('../utils/excelExporter').then(({ exportMissingInSupplier }) => {
+                exportMissingInSupplier(currentResults, selectedSupplier);
+              }).catch(err => {
+                console.error('שגיאה בייצוא נסיעות חסר בספק:', err);
+                alert('שגיאה בייצוא נסיעות חסר בספק');
+              });
+            }}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition-colors shadow-md"
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+          >
+            <Download className="w-4 h-4" />
+            ייצא נסיעות
+          </motion.button>
+        )}
+
         {/* בורר הפרשי מחיר - רק עבור price_difference */}
         {statusFilter === 'price_difference' && (
           <>
@@ -696,8 +717,13 @@ const AnalysisResults = memo(function AnalysisResults({ matchResults, employeeMa
                   <th className="px-4 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">
                     יעד (ספק)
                   </th>
+                  {selectedSupplier !== 'hori' && (
+                    <th className="px-4 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                      שמות עובדים (ספק)
+                    </th>
+                  )}
                   <th className="px-4 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                    שמות עובדים (ספק)
+                    הערות ספק
                   </th>
                   <th className="px-4 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">
                     מחיר ספק
@@ -705,7 +731,7 @@ const AnalysisResults = memo(function AnalysisResults({ matchResults, employeeMa
                   <th className="px-4 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">
                     סטטוס
                   </th>
-                  {selectedSupplier === 'gett' && (statusFilter === 'missing_in_ride_or_assigned_to_other') && (
+                  {selectedSupplier === 'gett' && (statusFilter === 'missing_in_ride' || statusFilter === 'missing_in_ride_or_assigned_to_other') && (
                     <th className="px-4 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">
                       הערות
                     </th>
@@ -809,7 +835,8 @@ const AnalysisResults = memo(function AnalysisResults({ matchResults, employeeMa
                 >
                   <td colSpan={
                     (statusFilter === 'missing_in_ride' || statusFilter === 'missing_in_ride_or_assigned_to_other')
-                      ? (selectedSupplier === 'gett' && statusFilter === 'missing_in_ride_or_assigned_to_other' ? 9 : 8) : 
+                      ? (selectedSupplier === 'gett' && (statusFilter === 'missing_in_ride' || statusFilter === 'missing_in_ride_or_assigned_to_other') ? 10 : 
+                         selectedSupplier === 'hori' ? 8 : 9) : 
                     statusFilter === 'missing_in_supplier' ? 6 : 
                     (selectedSupplier === 'gett' ? 11 : 10)
                   } className="px-4 py-12 text-center text-gray-500">
@@ -829,10 +856,27 @@ const AnalysisResults = memo(function AnalysisResults({ matchResults, employeeMa
                     {(statusFilter === 'missing_in_ride' || statusFilter === 'missing_in_ride_or_assigned_to_other') ? (
                       <>
                         <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 font-medium">
-                          {match.supplierData ? match.supplierData.orderNumber : '-'}
+                          {match.supplierData ? (
+                            selectedSupplier === 'hori' 
+                              ? (match.supplierData.tripNumber || '-')
+                              : (match.supplierData.orderNumber || match.supplierData.orderId || '-')
+                          ) : '-'}
                         </td>
                         <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {match.supplierData ? formatDateWithTime(match.supplierData.date, match.supplierData.time) : '-'}
+                          {match.supplierData ? (() => {
+                            const date = match.supplierData.date || '';
+                            const time = match.supplierData.time || '';
+                            // אם התאריך כבר כולל זמן, נציג אותו כמו שהוא
+                            if (date && date.includes(' ')) {
+                              return date;
+                            }
+                            // אחרת, נצרף את הזמן אם יש
+                            if (date && time) {
+                              return `${date} ${time}`;
+                            }
+                            // אם יש רק תאריך, נציג אותו
+                            return date || '-';
+                          })() : '-'}
                         </td>
                         <td className="px-4 py-4 text-sm text-gray-900">
                           {match.supplierData && match.supplierData.source ? match.supplierData.source : '-'}
@@ -840,21 +884,30 @@ const AnalysisResults = memo(function AnalysisResults({ matchResults, employeeMa
                         <td className="px-4 py-4 text-sm text-gray-900">
                           {match.supplierData && match.supplierData.destination ? match.supplierData.destination : '-'}
                         </td>
-                        <td className="px-4 py-4 text-sm text-gray-900">
-                          <div className="flex flex-col gap-1">
-                          {match.supplierData ? getEmployeeNames(match.supplierData.passengers) : '-'}
-                            {selectedSupplier === 'gett' && 
-                             match.supplierData && 
-                             match.supplierData.price === 28 && (
-                              <motion.span
-                                className="inline-flex items-center px-2 py-0.5 text-xs font-semibold rounded-full bg-red-100 text-red-800 w-fit"
-                                initial={{ scale: 0 }}
-                                animate={{ scale: 1 }}
-                              >
-                                ביטול מונית
-                              </motion.span>
-                            )}
-                          </div>
+                        {selectedSupplier !== 'hori' && (
+                          <td className="px-4 py-4 text-sm text-gray-900">
+                            <div className="flex flex-col gap-1">
+                            {match.supplierData ? getEmployeeNames(match.supplierData.passengers) : '-'}
+                              {selectedSupplier === 'gett' && 
+                               match.supplierData && 
+                               match.supplierData.price === 28 && (
+                                <motion.span
+                                  className="inline-flex items-center px-2 py-0.5 text-xs font-semibold rounded-full bg-red-100 text-red-800 w-fit"
+                                  initial={{ scale: 0 }}
+                                  animate={{ scale: 1 }}
+                                >
+                                  ביטול מונית
+                                </motion.span>
+                              )}
+                            </div>
+                          </td>
+                        )}
+                        <td className="px-4 py-4 text-sm text-gray-900 max-w-xs">
+                          {match.supplierData && match.supplierData.supplierNotes ? (
+                            <div className="text-xs text-gray-600 break-words">
+                              {match.supplierData.supplierNotes}
+                            </div>
+                          ) : '-'}
                         </td>
                         <td className="px-4 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">
                           {match.supplierData ? `₪${match.supplierData.price.toFixed(2)}` : '-'}
@@ -886,18 +939,25 @@ const AnalysisResults = memo(function AnalysisResults({ matchResults, employeeMa
                             </motion.span>
                           )}
                         </td>
-                        {selectedSupplier === 'gett' && statusFilter === 'missing_in_ride_or_assigned_to_other' && (
+                        {selectedSupplier === 'gett' && (statusFilter === 'missing_in_ride' || statusFilter === 'missing_in_ride_or_assigned_to_other') && (
                           <td className="px-4 py-4">
                             {(() => {
-                              const rideId = match.ride?.rideId;
-                              if (!rideId) return '-';
+                              // עבור missing_in_ride_or_assigned_to_other, נשתמש ב-rideId אם יש
+                              // עבור missing_in_ride, נשתמש ב-orderNumber כמפתח
+                              const noteKey = match.ride?.rideId || match.supplierData?.orderNumber || match.supplierData?.orderId;
+                              if (!noteKey) return '-';
+                              
+                              // עבור missing_in_ride, נשתמש במפתח מיוחד עם prefix
+                              const finalKey = match.ride?.rideId 
+                                ? noteKey 
+                                : `gett_missing_${noteKey}`;
                               
                               return (
                                 <textarea
-                                  value={rideNotes.get(rideId) || ''}
+                                  value={rideNotes.get(finalKey) || ''}
                                   onChange={(e) => {
                                     if (onUpdateNote) {
-                                      onUpdateNote(rideId, e.target.value);
+                                      onUpdateNote(finalKey, e.target.value);
                                     }
                                   }}
                                   placeholder="הוסף הערה..."
@@ -1362,9 +1422,28 @@ const AnalysisResults = memo(function AnalysisResults({ matchResults, employeeMa
                         <td className="px-4 py-4">
                           {(() => {
                             const rideId = match.ride?.rideId;
-                            if (!rideId) return '-';
                             
-                            // בדיקה אם יש הפרש מחיר
+                            // עבור גט, תמיד נציג שדה הערות אם יש rideId
+                            // עבור ספקים אחרים, רק אם יש הפרש מחיר
+                            if (selectedSupplier === 'gett') {
+                              if (!rideId) return '-';
+                              return (
+                                <textarea
+                                  value={rideNotes.get(rideId) || ''}
+                                  onChange={(e) => {
+                                    if (onUpdateNote) {
+                                      onUpdateNote(rideId, e.target.value);
+                                    }
+                                  }}
+                                  placeholder="הוסף הערה..."
+                                  className="w-full min-w-[200px] max-w-[300px] px-3 py-2 text-sm border-2 border-gray-300 rounded-lg focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-200 transition-all duration-200 resize-none"
+                                  rows={2}
+                                />
+                              );
+                            }
+                            
+                            // עבור ספקים אחרים, רק אם יש הפרש מחיר
+                            if (!rideId) return '-';
                             if (!shouldShowNotesField(match, selectedSupplier)) return '-';
                             
                             return (

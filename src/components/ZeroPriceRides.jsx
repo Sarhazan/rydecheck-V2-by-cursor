@@ -6,7 +6,7 @@ import PropTypes from 'prop-types';
 import { motion, AnimatePresence } from 'framer-motion';
 
 // Icons
-import { AlertTriangle, Edit2, Check, X } from 'lucide-react';
+import { AlertTriangle, Edit2, Check, X, RefreshCw, Trash2, Download } from 'lucide-react';
 
 /**
  * קומפוננטה להצגת נסיעות לבדיקה (מחיר אפס או נוסע 55555)
@@ -23,12 +23,16 @@ const ZeroPriceRides = memo(function ZeroPriceRides({
   updatedPrices = new Map(),
   passenger55555Departments = new Map(),
   onUpdatePassenger55555Department,
-  tripsRemovedFromReview = new Set()
+  onUpdateDepartmentsAndRecalculate,
+  tripsRemovedFromReview = new Set(),
+  guestRidesRemoved = new Set(),
+  onRemoveGuestRide
 }) {
   const [activeTab, setActiveTab] = useState('zeroPrice');
   const [editingRideId, setEditingRideId] = useState(null);
   const [editPrice, setEditPrice] = useState('');
   const [supplierFilter, setSupplierFilter] = useState('all');
+  const [delayedSupplierFilter, setDelayedSupplierFilter] = useState('all');
 
   // סינון נסיעות עם מחיר אפס (כולל נסיעות עם מחיר מעודכן של 0)
   // לא נכלול נסיעות שהוסרו מהרייד (tripsRemovedFromReview)
@@ -66,9 +70,15 @@ const ZeroPriceRides = memo(function ZeroPriceRides({
     return zeroPriceRides.filter(ride => ride.supplier === supplierFilter);
   }, [zeroPriceRides, supplierFilter]);
 
-  // סינון נסיעות עם נוסע 55555
+  // סינון נסיעות עם נוסע 55555 (לא כולל נסיעות שהוסרו מהרייד)
   const ridesWith55555 = useMemo(() => {
     return rides.filter(ride => {
+      // בדיקה אם הנסיעה הוסרה מהרייד
+      const isRemoved = ride.rideId && tripsRemovedFromReview && typeof tripsRemovedFromReview.has === 'function' && tripsRemovedFromReview.has(ride.rideId);
+      if (isRemoved) {
+        return false;
+      }
+      
       // בדיקה ב-PIDs
       if (ride.pids && ride.pids.includes(55555)) {
         return true;
@@ -83,7 +93,111 @@ const ZeroPriceRides = memo(function ZeroPriceRides({
       }
       return false;
     });
+  }, [rides, tripsRemovedFromReview]);
+
+  // סינון נסיעות ללא נוסעים
+  const ridesWithoutPassengers = useMemo(() => {
+    return rides.filter(ride => {
+      // בדיקה אם אין PIDs או שהמערך ריק
+      const hasPids = ride.pids && Array.isArray(ride.pids) && ride.pids.length > 0;
+      // בדיקה אם אין נוסעים בשדה נוסעים
+      const hasPassengers = ride.passengers && String(ride.passengers).trim() !== '';
+      // נסיעה ללא נוסעים = אין PIDs ואין נוסעים
+      return !hasPids && !hasPassengers;
+    });
   }, [rides]);
+
+  // סינון נסיעות אורח (קוד נוסע 12548 או "אורח אורח")
+  const guestRides = useMemo(() => {
+    return rides.filter(ride => {
+      // בדיקה אם הנסיעה הוסרה מהרייד
+      const isRemoved = ride.rideId && tripsRemovedFromReview && typeof tripsRemovedFromReview.has === 'function' && tripsRemovedFromReview.has(ride.rideId);
+      if (isRemoved) {
+        return false;
+      }
+      
+      // בדיקה אם הנסיעה הוסרה מרשימת נסיעות אורח
+      const isGuestRemoved = ride.rideId && guestRidesRemoved && typeof guestRidesRemoved.has === 'function' && guestRidesRemoved.has(ride.rideId);
+      if (isGuestRemoved) {
+        return false;
+      }
+      
+      // בדיקה ב-PIDs
+      if (ride.pids && ride.pids.includes(12548)) {
+        return true;
+      }
+      // בדיקה בשדה נוסעים (מחרוזת) - חיפוש "אורח אורח" או "12548"
+      if (ride.passengers) {
+        const passengersStr = String(ride.passengers);
+        // חיפוש "אורח אורח" או "12548" במחרוזת
+        if (passengersStr.includes('אורח אורח') || passengersStr.includes('12548')) {
+          return true;
+        }
+      }
+      return false;
+    });
+  }, [rides, tripsRemovedFromReview, guestRidesRemoved]);
+
+  // סינון נסיעות חריג (נסיעות שבהן יש את המילה "חריג" בשדה נוסעים)
+  const exceptionalRides = useMemo(() => {
+    return rides.filter(ride => {
+      // בדיקה אם הנסיעה הוסרה מהרייד
+      const isRemoved = ride.rideId && tripsRemovedFromReview && typeof tripsRemovedFromReview.has === 'function' && tripsRemovedFromReview.has(ride.rideId);
+      if (isRemoved) {
+        return false;
+      }
+      
+      // בדיקה בשדה נוסעים (מחרוזת) - חיפוש המילה "חריג"
+      if (ride.passengers) {
+        const passengersStr = String(ride.passengers);
+        // חיפוש המילה "חריג" במחרוזת
+        if (passengersStr.includes('חריג')) {
+          return true;
+        }
+      }
+      return false;
+    });
+  }, [rides, tripsRemovedFromReview]);
+
+  // סינון נסיעות איחורים (נסיעות שבהן יש את המילה "איחור" בשדה הערות)
+  const delayedRides = useMemo(() => {
+    return rides.filter(ride => {
+      // בדיקה אם הנסיעה הוסרה מהרייד
+      const isRemoved = ride.rideId && tripsRemovedFromReview && typeof tripsRemovedFromReview.has === 'function' && tripsRemovedFromReview.has(ride.rideId);
+      if (isRemoved) {
+        return false;
+      }
+      
+      // בדיקה בשדה הערות - חיפוש המילה "איחור"
+      if (ride.notes) {
+        const notesStr = String(ride.notes);
+        // חיפוש המילה "איחור" במחרוזת
+        if (notesStr.includes('איחור')) {
+          return true;
+        }
+      }
+      return false;
+    });
+  }, [rides, tripsRemovedFromReview]);
+
+  // איסוף כל הספקים הייחודיים מנסיעות איחורים
+  const delayedRidesSuppliers = useMemo(() => {
+    const suppliers = new Set();
+    delayedRides.forEach(ride => {
+      if (ride.supplier && ride.supplier.trim() !== '') {
+        suppliers.add(ride.supplier);
+      }
+    });
+    return Array.from(suppliers).sort();
+  }, [delayedRides]);
+
+  // סינון נסיעות איחורים לפי ספק
+  const filteredDelayedRides = useMemo(() => {
+    if (delayedSupplierFilter === 'all') {
+      return delayedRides;
+    }
+    return delayedRides.filter(ride => ride.supplier === delayedSupplierFilter);
+  }, [delayedRides, delayedSupplierFilter]);
 
   // חילוץ רשימת מחלקות מה-employeeMap
   const availableDepartments = useMemo(() => {
@@ -98,7 +212,7 @@ const ZeroPriceRides = memo(function ZeroPriceRides({
   }, [employeeMap]);
 
   // אם אין נסיעות בכלל, לא נציג כלום
-  if (zeroPriceRides.length === 0 && ridesWith55555.length === 0) {
+  if (zeroPriceRides.length === 0 && ridesWith55555.length === 0 && ridesWithoutPassengers.length === 0 && guestRides.length === 0 && exceptionalRides.length === 0 && delayedRides.length === 0) {
     return null;
   }
 
@@ -118,6 +232,62 @@ const ZeroPriceRides = memo(function ZeroPriceRides({
     }
   };
 
+  // פונקציה לפרסור תאריך ושעה
+  const parseDateAndTime = (dateStr, timeStr) => {
+    let datePart = dateStr || '';
+    let timePart = timeStr || '';
+    
+    // אם התאריך כולל זמן (מכיל : או space עם מספרים)
+    if (dateStr && (dateStr.includes(':') || dateStr.includes(' '))) {
+      const parts = dateStr.split(/[\sT]/);
+      if (parts.length > 1) {
+        datePart = parts[0];
+        timePart = parts[1] || '';
+      }
+    }
+    
+    if (!datePart) return '-';
+    
+    try {
+      // ניסיון לפרסר את התאריך
+      let date;
+      if (datePart.includes('/')) {
+        const [day, month, year] = datePart.split('/').map(Number);
+        if (timePart) {
+          const [hours, minutes] = timePart.split(':').map(Number);
+          date = new Date(year, month - 1, day, hours || 0, minutes || 0);
+        } else {
+          date = new Date(year, month - 1, day);
+        }
+      } else {
+        date = new Date(datePart + (timePart ? ' ' + timePart : ''));
+      }
+      
+      if (isNaN(date.getTime())) {
+        return datePart + (timePart ? ' ' + timePart : '');
+      }
+      
+      const dateFormatted = date.toLocaleDateString('he-IL', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      });
+      
+      if (timePart) {
+        const timeFormatted = date.toLocaleTimeString('he-IL', {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false
+        });
+        return `${dateFormatted} ${timeFormatted}`;
+      }
+      
+      return dateFormatted;
+    } catch {
+      return datePart + (timePart ? ' ' + timePart : '');
+    }
+  };
+
   // פונקציה לקבלת שמות עובדים
   const getEmployeeNames = (pids) => {
     if (!pids || pids.length === 0) return '-';
@@ -130,9 +300,53 @@ const ZeroPriceRides = memo(function ZeroPriceRides({
     }).join(', ');
   };
 
+  // פונקציה לחילוץ רק נוסעים עם "חריג" מהמחרוזת
+  const extractExceptionalPassengers = (passengersStr) => {
+    if (!passengersStr || passengersStr === '-') return '-';
+    
+    const str = String(passengersStr).trim();
+    if (!str) return '-';
+    
+    // פיצול לפי נקודה-פסיק (עם או בלי רווח אחרי)
+    const parts = str.split(/[;]\s*/).map(part => part.trim()).filter(part => part !== '');
+    
+    // אם אין חלקים, נחזיר את המחרוזת המקורית
+    if (parts.length === 0) {
+      return str;
+    }
+    
+    // חיפוש חלקים שמכילים "חריג"
+    const exceptionalParts = parts.filter(part => part.includes('חריג'));
+    
+    if (exceptionalParts.length === 0) {
+      // אם לא נמצא "חריג" בכל החלקים, נחזיר את המחרוזת המקורית
+      return str;
+    }
+    
+    // החזרת רק החלקים עם "חריג" מחוברים בנקודה-פסיק
+    return exceptionalParts.join('; ');
+  };
+
   // בחירת הנסיעות לפי הטאב הפעיל
-  const currentRides = activeTab === 'zeroPrice' ? filteredZeroPriceRides : ridesWith55555;
-  const currentCount = activeTab === 'zeroPrice' ? filteredZeroPriceRides.length : ridesWith55555.length;
+  const currentRides = useMemo(() => {
+    if (activeTab === 'zeroPrice') return filteredZeroPriceRides;
+    if (activeTab === 'passenger55555') return ridesWith55555;
+    if (activeTab === 'noPassengers') return ridesWithoutPassengers;
+    if (activeTab === 'guest') return guestRides;
+    if (activeTab === 'exceptional') return exceptionalRides;
+    if (activeTab === 'delayed') return filteredDelayedRides;
+    return [];
+  }, [activeTab, filteredZeroPriceRides, ridesWith55555, ridesWithoutPassengers, guestRides, exceptionalRides, filteredDelayedRides]);
+  
+  const currentCount = useMemo(() => {
+    if (activeTab === 'zeroPrice') return filteredZeroPriceRides.length;
+    if (activeTab === 'passenger55555') return ridesWith55555.length;
+    if (activeTab === 'noPassengers') return ridesWithoutPassengers.length;
+    if (activeTab === 'guest') return guestRides.length;
+    if (activeTab === 'exceptional') return exceptionalRides.length;
+    if (activeTab === 'delayed') return filteredDelayedRides.length;
+    return 0;
+  }, [activeTab, filteredZeroPriceRides.length, ridesWith55555.length, ridesWithoutPassengers.length, guestRides.length, exceptionalRides.length, filteredDelayedRides.length]);
 
   // פונקציה לקבלת מחיר מעודכן או מקורי
   const getPrice = (ride) => {
@@ -179,6 +393,17 @@ const ZeroPriceRides = memo(function ZeroPriceRides({
     }
   };
 
+  // פונקציה להסרת נסיעת אורח מהרשימה
+  const handleRemoveGuestRide = (rideId) => {
+    if (!onRemoveGuestRide || !rideId) return;
+    
+    onRemoveGuestRide(prev => {
+      const newSet = new Set(prev);
+      newSet.add(rideId);
+      return newSet;
+    });
+  };
+
   return (
     <motion.div
       className="mb-8"
@@ -221,6 +446,46 @@ const ZeroPriceRides = memo(function ZeroPriceRides({
             >
               נוסע 55555 ({ridesWith55555.length})
             </button>
+            <button
+              onClick={() => setActiveTab('noPassengers')}
+              className={`px-6 py-3 rounded-lg font-semibold transition-all duration-200 ${
+                activeTab === 'noPassengers'
+                  ? 'bg-yellow-500 text-yellow-900 shadow-md'
+                  : 'bg-yellow-200/50 text-yellow-800 hover:bg-yellow-300/50'
+              }`}
+            >
+              נסיעות ללא נוסעים ({ridesWithoutPassengers.length})
+            </button>
+            <button
+              onClick={() => setActiveTab('guest')}
+              className={`px-6 py-3 rounded-lg font-semibold transition-all duration-200 ${
+                activeTab === 'guest'
+                  ? 'bg-yellow-500 text-yellow-900 shadow-md'
+                  : 'bg-yellow-200/50 text-yellow-800 hover:bg-yellow-300/50'
+              }`}
+            >
+              נסיעות אורח ({guestRides.length})
+            </button>
+            <button
+              onClick={() => setActiveTab('exceptional')}
+              className={`px-6 py-3 rounded-lg font-semibold transition-all duration-200 ${
+                activeTab === 'exceptional'
+                  ? 'bg-yellow-500 text-yellow-900 shadow-md'
+                  : 'bg-yellow-200/50 text-yellow-800 hover:bg-yellow-300/50'
+              }`}
+            >
+              נסיעות חריג ({exceptionalRides.length})
+            </button>
+            <button
+              onClick={() => setActiveTab('delayed')}
+              className={`px-6 py-3 rounded-lg font-semibold transition-all duration-200 ${
+                activeTab === 'delayed'
+                  ? 'bg-yellow-500 text-yellow-900 shadow-md'
+                  : 'bg-yellow-200/50 text-yellow-800 hover:bg-yellow-300/50'
+              }`}
+            >
+              איחורים ({delayedRides.length})
+            </button>
           </div>
         </div>
 
@@ -252,6 +517,125 @@ const ZeroPriceRides = memo(function ZeroPriceRides({
           </div>
         )}
 
+        {/* בורר סינון לפי ספק - רק לאיחורים */}
+        {activeTab === 'delayed' && delayedRidesSuppliers.length > 0 && (
+          <div className="px-4 py-3 bg-yellow-50 border-b border-yellow-200">
+            <div className="flex items-center gap-3">
+              <label className="text-sm font-semibold text-gray-700 whitespace-nowrap">
+                סינון לפי ספק:
+              </label>
+              <select
+                value={delayedSupplierFilter}
+                onChange={(e) => setDelayedSupplierFilter(e.target.value)}
+                className="border-2 border-yellow-300 rounded-lg px-4 py-2 text-sm font-medium bg-white hover:border-yellow-400 focus:border-yellow-500 focus:outline-none focus:ring-2 focus:ring-yellow-200 transition-all duration-200 min-w-[150px]"
+              >
+                <option value="all">הכל</option>
+                {delayedRidesSuppliers.map(supplier => (
+                  <option key={supplier} value={supplier}>
+                    {supplier}
+                  </option>
+                ))}
+              </select>
+              {delayedSupplierFilter !== 'all' && (
+                <span className="text-xs text-gray-600">
+                  ({filteredDelayedRides.length} מתוך {delayedRides.length})
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* כפתור ייצוא נסיעות - רק לנסיעות חריג */}
+        {activeTab === 'exceptional' && exceptionalRides.length > 0 && (
+          <div className="px-4 py-3 bg-yellow-50 border-b border-yellow-200">
+            <div className="flex items-center gap-3">
+              <motion.button
+                onClick={() => {
+                  // טעינה דינמית של excelExporter
+                  import('../utils/excelExporter').then(({ exportExceptionalRides }) => {
+                    exportExceptionalRides(exceptionalRides);
+                  }).catch(err => {
+                    console.error('שגיאה בייצוא נסיעות חריג:', err);
+                    alert('שגיאה בייצוא נסיעות חריג');
+                  });
+                }}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition-colors shadow-md"
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+              >
+                <Download className="w-4 h-4" />
+                ייצא נסיעות
+              </motion.button>
+              <span className="text-xs text-gray-600">
+                ({exceptionalRides.length} נסיעות)
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* כפתור ייצוא נסיעות - רק לנסיעות אורח */}
+        {activeTab === 'guest' && guestRides.length > 0 && (
+          <div className="px-4 py-3 bg-yellow-50 border-b border-yellow-200">
+            <div className="flex items-center gap-3">
+              <motion.button
+                onClick={() => {
+                  // טעינה דינמית של excelExporter
+                  import('../utils/excelExporter').then(({ exportGuestRides }) => {
+                    exportGuestRides(guestRides);
+                  }).catch(err => {
+                    console.error('שגיאה בייצוא נסיעות אורח:', err);
+                    alert('שגיאה בייצוא נסיעות אורח');
+                  });
+                }}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition-colors shadow-md"
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+              >
+                <Download className="w-4 h-4" />
+                ייצא נסיעות
+              </motion.button>
+              <span className="text-xs text-gray-600">
+                ({guestRides.length} נסיעות)
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* כפתור עדכן נתונים - רק לנוסע 55555 */}
+        {activeTab === 'passenger55555' && ridesWith55555.length > 0 && (
+          <div className="px-4 py-3 bg-yellow-50 border-b border-yellow-200">
+            <div className="flex items-center gap-3">
+              <motion.button
+                onClick={() => {
+                  if (onUpdateDepartmentsAndRecalculate) {
+                    onUpdateDepartmentsAndRecalculate();
+                  }
+                }}
+                disabled={!passenger55555Departments || passenger55555Departments.size === 0}
+                className={`inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg transition-colors shadow-md ${
+                  passenger55555Departments && passenger55555Departments.size > 0
+                    ? 'bg-green-600 text-white hover:bg-green-700 cursor-pointer'
+                    : 'bg-gray-400 text-gray-200 cursor-not-allowed opacity-60'
+                }`}
+                whileHover={passenger55555Departments && passenger55555Departments.size > 0 ? { scale: 1.05 } : {}}
+                whileTap={passenger55555Departments && passenger55555Departments.size > 0 ? { scale: 0.95 } : {}}
+              >
+                <RefreshCw className="w-4 h-4" />
+                עדכן נתונים
+              </motion.button>
+              {passenger55555Departments && passenger55555Departments.size > 0 ? (
+                <span className="text-xs text-gray-600">
+                  ({passenger55555Departments.size} נסיעות עם שיוך מחלקתי)
+                </span>
+              ) : (
+                <span className="text-xs text-gray-500">
+                  בחר מחלקה לנסיעות כדי לעדכן
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* טבלה */}
         <div className="overflow-x-auto">
           <table className="w-full">
@@ -261,34 +645,72 @@ const ZeroPriceRides = memo(function ZeroPriceRides({
                   מספר נסיעה
                 </th>
                 <th className="px-6 py-4 text-right text-sm font-bold text-gray-800 border-b-2 border-yellow-300">
-                  תאריך
+                  {activeTab === 'noPassengers' ? 'תאריך ושעה' : 'תאריך'}
                 </th>
-                <th className="px-6 py-4 text-right text-sm font-bold text-gray-800 border-b-2 border-yellow-300">
-                  מוצא
-                </th>
-                <th className="px-6 py-4 text-right text-sm font-bold text-gray-800 border-b-2 border-yellow-300">
-                  יעד
-                </th>
-                <th className="px-6 py-4 text-right text-sm font-bold text-gray-800 border-b-2 border-yellow-300">
-                  נוסעים
-                </th>
+                {activeTab !== 'noPassengers' && (
+                  <>
+                    <th className="px-6 py-4 text-right text-sm font-bold text-gray-800 border-b-2 border-yellow-300">
+                      מוצא
+                    </th>
+                    <th className="px-6 py-4 text-right text-sm font-bold text-gray-800 border-b-2 border-yellow-300">
+                      יעד
+                    </th>
+                    <th className="px-6 py-4 text-right text-sm font-bold text-gray-800 border-b-2 border-yellow-300">
+                      נוסעים
+                    </th>
+                  </>
+                )}
+                {activeTab === 'noPassengers' && (
+                  <>
+                    <th className="px-6 py-4 text-right text-sm font-bold text-gray-800 border-b-2 border-yellow-300">
+                      מקור
+                    </th>
+                    <th className="px-6 py-4 text-right text-sm font-bold text-gray-800 border-b-2 border-yellow-300">
+                      יעד
+                    </th>
+                  </>
+                )}
                 {activeTab === 'passenger55555' && (
                   <th className="px-6 py-4 text-right text-sm font-bold text-gray-800 border-b-2 border-yellow-300">
                     שייך למחלקה
                   </th>
                 )}
-                <th className="px-6 py-4 text-right text-sm font-bold text-gray-800 border-b-2 border-yellow-300">
-                  ספק
-                </th>
+                {activeTab !== 'noPassengers' && (
+                  <th className="px-6 py-4 text-right text-sm font-bold text-gray-800 border-b-2 border-yellow-300">
+                    ספק
+                  </th>
+                )}
                 <th className="px-6 py-4 text-right text-sm font-bold text-gray-800 border-b-2 border-yellow-300">
                   מחיר
                 </th>
+                {activeTab === 'delayed' && (
+                  <th className="px-6 py-4 text-right text-sm font-bold text-gray-800 border-b-2 border-yellow-300">
+                    הערות
+                  </th>
+                )}
+                {activeTab === 'guest' && (
+                  <>
+                    <th className="px-6 py-4 text-right text-sm font-bold text-gray-800 border-b-2 border-yellow-300">
+                      הערות
+                    </th>
+                    <th className="px-6 py-4 text-right text-sm font-bold text-gray-800 border-b-2 border-yellow-300">
+                      פעולות
+                    </th>
+                  </>
+                )}
               </tr>
             </thead>
             <tbody>
               {currentRides.length === 0 ? (
                 <tr>
-                  <td colSpan={activeTab === 'passenger55555' ? 8 : 7} className="px-6 py-8 text-center text-gray-500">
+                  <td colSpan={
+                    activeTab === 'passenger55555' ? 8 : 
+                    activeTab === 'noPassengers' ? 5 : 
+                    activeTab === 'guest' ? 9 :
+                    activeTab === 'exceptional' ? 7 :
+                    activeTab === 'delayed' ? 8 :
+                    7
+                  } className="px-6 py-8 text-center text-gray-500">
                     אין נסיעות בקטגוריה זו
                   </td>
                 </tr>
@@ -311,17 +733,35 @@ const ZeroPriceRides = memo(function ZeroPriceRides({
                         {ride.rideId || '-'}
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-700">
-                        {parseDate(ride.date)}
+                        {activeTab === 'noPassengers' 
+                          ? parseDateAndTime(ride.date, ride.time) 
+                          : parseDate(ride.date)}
                       </td>
-                      <td className="px-6 py-4 text-sm text-gray-700">
-                        {ride.source || '-'}
-                      </td>
-                      <td className="px-6 py-4 text-sm text-gray-700">
-                        {ride.destination || '-'}
-                      </td>
-                      <td className="px-6 py-4 text-sm text-gray-700">
-                        {ride.passengers || getEmployeeNames(ride.pids) || '-'}
-                      </td>
+                      {activeTab !== 'noPassengers' && (
+                        <>
+                          <td className="px-6 py-4 text-sm text-gray-700">
+                            {ride.source || '-'}
+                          </td>
+                          <td className="px-6 py-4 text-sm text-gray-700">
+                            {ride.destination || '-'}
+                          </td>
+                          <td className="px-6 py-4 text-sm text-gray-700">
+                            {activeTab === 'exceptional' 
+                              ? extractExceptionalPassengers(ride.passengers || getEmployeeNames(ride.pids) || '')
+                              : (ride.passengers || getEmployeeNames(ride.pids) || '-')}
+                          </td>
+                        </>
+                      )}
+                      {activeTab === 'noPassengers' && (
+                        <>
+                          <td className="px-6 py-4 text-sm text-gray-700">
+                            {ride.source || '-'}
+                          </td>
+                          <td className="px-6 py-4 text-sm text-gray-700">
+                            {ride.destination || '-'}
+                          </td>
+                        </>
+                      )}
                       {activeTab === 'passenger55555' && (
                         <td className="px-6 py-4 text-sm text-gray-700">
                           <select
@@ -342,9 +782,11 @@ const ZeroPriceRides = memo(function ZeroPriceRides({
                           </select>
                         </td>
                       )}
-                      <td className="px-6 py-4 text-sm text-gray-700">
-                        {ride.supplier || '-'}
-                      </td>
+                      {activeTab !== 'noPassengers' && (
+                        <td className="px-6 py-4 text-sm text-gray-700">
+                          {ride.supplier || '-'}
+                        </td>
+                      )}
                       <td className="px-6 py-4 text-sm font-bold">
                         {activeTab === 'zeroPrice' && editingRideId === ride.rideId ? (
                           <div className="flex items-center gap-2">
@@ -405,6 +847,34 @@ const ZeroPriceRides = memo(function ZeroPriceRides({
                           </div>
                         )}
                       </td>
+                      {activeTab === 'delayed' && (
+                        <td className="px-6 py-4 text-sm text-gray-700 max-w-xs">
+                          <div className="text-right break-words whitespace-pre-line" title={ride.notes || ''}>
+                            {ride.notes ? ride.notes.replace(/<br\s*\/?>/gi, '\n') : '-'}
+                          </div>
+                        </td>
+                      )}
+                      {activeTab === 'guest' && (
+                        <>
+                          <td className="px-6 py-4 text-sm text-gray-700 max-w-xs">
+                            <div className="text-right break-words whitespace-pre-line" title={ride.notes || ''}>
+                              {ride.notes ? ride.notes.replace(/<br\s*\/?>/gi, '\n') : '-'}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 text-sm text-gray-700">
+                            <motion.button
+                              onClick={() => handleRemoveGuestRide(ride.rideId)}
+                              className="inline-flex items-center gap-2 px-3 py-2 bg-red-500 text-white text-xs font-semibold rounded-lg hover:bg-red-600 transition-colors shadow-md"
+                              whileHover={{ scale: 1.05 }}
+                              whileTap={{ scale: 0.95 }}
+                              title="הסר מרשימה"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                              הסר מרשימה
+                            </motion.button>
+                          </td>
+                        </>
+                      )}
                     </motion.tr>
                   );
                 })
@@ -425,7 +895,10 @@ ZeroPriceRides.propTypes = {
   updatedPrices: PropTypes.instanceOf(Map),
   passenger55555Departments: PropTypes.instanceOf(Map),
   onUpdatePassenger55555Department: PropTypes.func,
-  tripsRemovedFromReview: PropTypes.instanceOf(Set)
+  onUpdateDepartmentsAndRecalculate: PropTypes.func,
+  tripsRemovedFromReview: PropTypes.instanceOf(Set),
+  guestRidesRemoved: PropTypes.instanceOf(Set),
+  onRemoveGuestRide: PropTypes.func
 };
 
 ZeroPriceRides.defaultProps = {
@@ -434,7 +907,10 @@ ZeroPriceRides.defaultProps = {
   updatedPrices: new Map(),
   passenger55555Departments: new Map(),
   onUpdatePassenger55555Department: null,
-  tripsRemovedFromReview: new Set()
+  onUpdateDepartmentsAndRecalculate: null,
+  tripsRemovedFromReview: new Set(),
+  guestRidesRemoved: new Set(),
+  onRemoveGuestRide: null
 };
 
 export default ZeroPriceRides;

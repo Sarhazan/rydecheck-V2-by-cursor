@@ -61,6 +61,9 @@ function App() {
     return new Set();
   }); // Set<rideId> - נסיעות שהוסרו מבדיקה (לא צריכות שיוך)
   const [passenger55555Departments, setPassenger55555Departments] = useState(new Map()); // Map<rideId, departmentName> - שיוך מחלקתי לנסיעות עם נוסע 55555
+  const [guestRidesRemoved, setGuestRidesRemoved] = useState(() => {
+    return new Set();
+  }); // Set<rideId> - נסיעות אורח שהוסרו מהרשימה
   const [activityLogs, setActivityLogs] = useState([]); // מערך של פעולות שבוצעו
   const [showActivityLogModal, setShowActivityLogModal] = useState(false); // האם מודל הלוגים פתוח
 
@@ -162,6 +165,7 @@ function App() {
     setUpdatedPrices(new Map());
     setManualGettMatches(new Map());
     setPassenger55555Departments(new Map());
+    setGuestRidesRemoved(new Set());
     setActivityLogs([]);
   }, []);
 
@@ -424,6 +428,44 @@ function App() {
     });
   }, []);
 
+  const handleUpdatePassenger55555DepartmentsAndRecalculate = useCallback(() => {
+    if (!parsedData.rides || parsedData.rides.length === 0) return;
+    
+    try {
+      setIsAnalyzing(true);
+      setError(null);
+      
+      // סינון נסיעות שהוסרו מהרייד לפני חישוב ההתפלגות המחלקתית
+      const filteredRides = parsedData.rides.filter(ride => {
+        if (!ride.rideId) return true;
+        if (tripsRemovedFromReview && typeof tripsRemovedFromReview.has === 'function') {
+          return !tripsRemovedFromReview.has(ride.rideId);
+        }
+        return true;
+      });
+      
+      // חישוב מחדש של ההתפלגות המחלקתית עם השיוכים החדשים
+      const deptData = calculateDepartmentBreakdown(filteredRides, parsedData.employeeMap, passenger55555Departments);
+      setDepartmentData(deptData);
+      
+      // הוספת כל הנסיעות עם שיוך מחלקתי ל-tripsRemovedFromReview כדי שהן ייעלמו מהטבלה
+      setTripsRemovedFromReview(prev => {
+        const newSet = new Set(prev);
+        passenger55555Departments.forEach((department, rideId) => {
+          if (department && department.trim() !== '') {
+            newSet.add(rideId);
+          }
+        });
+        return newSet;
+      });
+      
+    } catch (err) {
+      handleError(err, 'עדכון נתונים', setError);
+    } finally {
+      setIsAnalyzing(false);
+    }
+  }, [parsedData, passenger55555Departments, tripsRemovedFromReview]);
+
   const handleManualGettMatch = useCallback((rideId, gettOrderNumber) => {
     // עדכון manualGettMatches
     setManualGettMatches(prev => {
@@ -531,7 +573,7 @@ function App() {
         return true;
       });
 
-      const deptData = calculateDepartmentBreakdown(filteredRidesForDepartment, parsedData.employeeMap);
+      const deptData = calculateDepartmentBreakdown(filteredRidesForDepartment, parsedData.employeeMap, passenger55555Departments);
       setDepartmentData(deptData);
 
     } catch (err) {
@@ -614,7 +656,7 @@ function App() {
       });
 
       // חישוב מחדש של ההתפלגות המחלקתית
-      const deptData = calculateDepartmentBreakdown(filteredRides, updatedEmployeeMap);
+      const deptData = calculateDepartmentBreakdown(filteredRides, updatedEmployeeMap, passenger55555Departments);
       setDepartmentData(deptData);
 
     } catch (err) {
@@ -834,15 +876,10 @@ function App() {
 
           {/* סיכום נתונים - קונטיינר מעוגל בצד שמאל */}
           {(matchResults || departmentData) && parsedData.rides.length > 0 && (() => {
-            // סינון נסיעות שהוסרו מבדיקה
-            const filteredRides = parsedData.rides.filter(ride => {
-              if (ride.rideId && tripsRemovedFromReview && typeof tripsRemovedFromReview.has === 'function' && tripsRemovedFromReview.has(ride.rideId)) {
-                return false;
-              }
-              return true;
-            });
-            const totalRides = filteredRides.length;
-            const totalAmount = filteredRides.reduce((sum, ride) => {
+            // סיכום נתונים - מציג את כל הנסיעות (לא מסנן נסיעות שהוסרו)
+            // נסיעות שהוסרו יופיעו בחלוקה המחלקתית אבל לא ייספרו בסיכום הכללי
+            const totalRides = parsedData.rides.length;
+            const totalAmount = parsedData.rides.reduce((sum, ride) => {
               const price = updatedPrices.has(ride.rideId) 
                 ? updatedPrices.get(ride.rideId) 
                 : (ride.price || 0);
@@ -898,7 +935,10 @@ function App() {
                   updatedPrices={updatedPrices}
                   passenger55555Departments={passenger55555Departments}
                   onUpdatePassenger55555Department={handleUpdatePassenger55555Department}
+                  onUpdateDepartmentsAndRecalculate={handleUpdatePassenger55555DepartmentsAndRecalculate}
                   tripsRemovedFromReview={tripsRemovedFromReview}
+                  guestRidesRemoved={guestRidesRemoved}
+                  onRemoveGuestRide={setGuestRidesRemoved}
                   activityLogs={activityLogs}
                   setActivityLogs={setActivityLogs}
                 />

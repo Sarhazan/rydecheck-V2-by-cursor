@@ -88,7 +88,7 @@ export function useAnalysis(
         return true;
       });
 
-      const deptData = calculateDepartmentBreakdown(filteredRidesForDepartment, parsedData.employeeMap);
+      const deptData = calculateDepartmentBreakdown(filteredRidesForDepartment, parsedData.employeeMap, parsedData.passenger55555Departments || new Map());
       setDepartmentData(deptData);
 
     } catch (err) {

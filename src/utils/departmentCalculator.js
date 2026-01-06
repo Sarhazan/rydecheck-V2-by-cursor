@@ -2,19 +2,28 @@
  * חישוב חלוקה מחלקתית לכל נסיעה
  * @param {Array} rides - מערך של נסיעות
  * @param {Map} employeeMap - מפה של עובדים (key: employeeId, value: employee object)
+ * @param {Map} passenger55555Departments - מפה של שיוך מחלקתי לנסיעות עם נוסע 55555 (key: rideId, value: departmentName)
  * @returns {Object} אובייקט עם breakdown (חלוקה לכל נסיעה) ו-totals (סיכומים למחלקות)
  */
-export function calculateDepartmentBreakdown(rides, employeeMap) {
+export function calculateDepartmentBreakdown(rides, employeeMap, passenger55555Departments = new Map()) {
   const departmentBreakdown = [];
   const departmentTotals = new Map();
   
   rides.forEach(ride => {
+    // בדיקה אם יש שיוך מחלקתי ידני לנסיעה עם נוסע 55555
+    const assignedDepartment = passenger55555Departments.get(ride.rideId);
+    
     // קיבוץ עובדים לפי מחלקה
     const employeesByDepartment = new Map();
     let totalValidPassengers = 0; // רק PIDs שנמצאים ב-employeeMap
     
     if (ride.pids && ride.pids.length > 0) {
       ride.pids.forEach(pid => {
+        // דילוג על נוסע 55555 אם יש שיוך מחלקתי ידני
+        if (pid === 55555 && assignedDepartment) {
+          return;
+        }
+        
         const employee = employeeMap.get(pid);
         if (employee && employee.department) {
           const dept = employee.department;
@@ -27,7 +36,17 @@ export function calculateDepartmentBreakdown(rides, employeeMap) {
       });
     }
     
-    // אם אין עובדים תקינים, נשים את הנסיעה במחלקה "ללא מחלקה"
+    // אם יש שיוך מחלקתי ידני, נוסיף אותו לחלוקה
+    if (assignedDepartment) {
+      // נוסיף את המחלקה שהוקצתה ל-employeesByDepartment (אם לא קיימת)
+      if (!employeesByDepartment.has(assignedDepartment)) {
+        employeesByDepartment.set(assignedDepartment, []);
+      }
+      // נחשוב שהנוסע 55555 הוא חלק מהמחלקה שהוקצתה (נוסיף 1 לספירת הנוסעים)
+      totalValidPassengers++;
+    }
+    
+    // אם אין עובדים תקינים ואין שיוך מחלקתי ידני, נשים את הנסיעה במחלקה "ללא מחלקה"
     if (totalValidPassengers === 0) {
       const noDepartment = 'ללא מחלקה';
       const ridePrice = ride.price || 0;
@@ -57,8 +76,14 @@ export function calculateDepartmentBreakdown(rides, employeeMap) {
     const departmentPrices = new Map();
     
     employeesByDepartment.forEach((employees, department) => {
-      const departmentPassengerCount = employees.length;
-      const departmentPrice = (departmentPassengerCount / totalValidPassengers) * ride.price;
+      // חישוב מספר הנוסעים - אם זה המחלקה שהוקצתה ידנית, נוסיף 1 לנוסע 55555
+      let departmentPassengerCount = employees.length;
+      if (assignedDepartment === department) {
+        // אם יש שיוך מחלקתי ידני למחלקה הזאת, נחשוב שיש לה נוסע נוסף (55555)
+        departmentPassengerCount = employees.length + 1;
+      }
+      
+      const departmentPrice = (departmentPassengerCount / totalValidPassengers) * (ride.price || 0);
       
       departmentPrices.set(department, {
         price: departmentPrice,

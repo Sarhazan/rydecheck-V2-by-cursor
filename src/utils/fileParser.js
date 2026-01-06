@@ -25,8 +25,11 @@ export function extractPids(historyField) {
 
 /**
  * עיבוד נתוני נסיעות לאחר פרסינג
+ * @param {Array} data - מערך של שורות מהקובץ
+ * @param {Function} resolve - פונקציה לפתרון Promise
+ * @param {Array} headers - מערך של כותרות העמודות (אופציונלי)
  */
-function processRidesData(data, resolve) {
+function processRidesData(data, resolve, headers = []) {
   const rides = data.map((row, index) => {
     // ניקוי מקפים מהכותרות - אם הכותרות מכילות מקפים, נסיר אותם
     const cleanRow = {};
@@ -106,6 +109,46 @@ function processRidesData(data, resolve) {
       dateValue = `${dateValue} ${timeValue}`;
     }
     
+    // חילוץ הערות - ננסה למצוא לפי שם או לפי אינדקס (עמודה AF = אינדקס 31)
+    let notes = '';
+    
+    // נסיון ראשון: חיפוש לפי שם
+    const notesKeys = ['הערות', 'הערה', 'notes', 'Notes', 'NOTE', 'note', 'הערות נוספות', 'הערות נסיעה'];
+    for (const key of notesKeys) {
+      if (cleanRow[key] !== undefined && cleanRow[key] !== null && String(cleanRow[key]).trim() !== '') {
+        notes = String(cleanRow[key]).trim();
+        break;
+      }
+    }
+    
+    // נסיון שני: אם לא נמצא לפי שם, ננסה לפי אינדקס (עמודה AF = אינדקס 31)
+    // אם יש לנו את headers, נוכל למצוא את שם העמודה באינדקס 31
+    if (!notes && headers && headers.length > 31) {
+      const columnName = headers[31];
+      if (columnName && cleanRow[columnName] !== undefined) {
+        const value = String(cleanRow[columnName] || '').trim();
+        if (value) {
+          notes = value;
+        }
+      }
+    }
+    
+    // נסיון שלישי: אם עדיין לא מצאנו, נחפש בכל המפתחות לפי מיקום יחסי
+    // ננסה למצוא מפתח שמתחיל ב-"AF" או מפתח שמכיל "31"
+    if (!notes) {
+      const allKeys = Object.keys(cleanRow);
+      for (const key of allKeys) {
+        const keyUpper = key.toUpperCase().trim();
+        if (keyUpper === 'AF' || keyUpper.includes('AF') || key.includes('31')) {
+          const value = String(cleanRow[key] || '').trim();
+          if (value) {
+            notes = value;
+            break;
+          }
+        }
+      }
+    }
+
     const rideData = {
       rideId: isNaN(rideId) ? null : rideId,
       date: dateValue,
@@ -115,6 +158,7 @@ function processRidesData(data, resolve) {
       destination: cleanRow.יעד || '',
       price: isNaN(price) ? 0 : price,
       supplier: cleanRow.ספק || '',
+      notes: notes, // הוספת שדה הערות
       rawData: cleanRow
     };
     
@@ -234,8 +278,8 @@ export function parseRideFile(data, filename) {
         dataRows.push(row);
       }
       
-      // 5. עיבוד הנתונים
-      processRidesData(dataRows, resolve);
+      // 5. עיבוד הנתונים - מעבירים גם את הכותרות כדי שנוכל למצוא עמודות לפי אינדקס
+      processRidesData(dataRows, resolve, headers);
     } catch (error) {
       reject(error);
     }
@@ -345,6 +389,75 @@ function parsePrice(priceValue) {
   const cleanPrice = String(priceValue).replace(/[₪,\s]/g, '').trim();
   const parsed = parseFloat(cleanPrice);
   return isNaN(parsed) ? 0 : parsed;
+}
+
+/**
+ * חילוץ הערות ספק - טקסט מוקף בכוכביות (*** או יותר)
+ * הפונקציה מסירה טקסט מוקף בכוכביות מהמחרוזת ומחזירה את הטקסט המנוקה ואת ההערות שהוסרו
+ * 
+ * @param {string} text - הטקסט המקורי שעלול להכיל הערות מוקפות בכוכביות
+ * @returns {{cleaned: string, notes: string}} אובייקט עם הטקסט המנוקה וההערות שהוסרו
+ * 
+ * @example
+ * extractSupplierNotes("*** נסיעה בוטלה *** פיזור: נתבג")
+ * // { cleaned: "פיזור: נתבג", notes: "*** נסיעה בוטלה ***" }
+ * 
+ * @example
+ * extractSupplierNotes("**** נסיעה בוטלה")
+ * // { cleaned: "", notes: "**** נסיעה בוטלה" }
+ */
+function extractSupplierNotes(text) {
+  if (!text || typeof text !== 'string') {
+    return { cleaned: text || '', notes: '' };
+  }
+  
+  // חיפוש כל הטקסטים המוקפים בכוכביות (3 כוכביות או יותר)
+  // מחפש גם מקרים שבהם יש כמה בלוקים של כוכביות עם טקסט ביניהם
+  // דוגמה: "*** נסיעה בוטלה *** עדכון ***" או "**** נסיעה בוטלה" או "*** נסיעה בוטלה ***"
+  const asteriskPatternFull = /\*{3,}[^*]*\*{3,}/g; // *** טקסט ***
+  const asteriskPatternStart = /^\*{3,}[^*]+/; // *** טקסט (בהתחלה)
+  const asteriskPatternEnd = /[^*]+\*{3,}$/; // טקסט *** (בסוף)
+  const notes = [];
+  let cleaned = text;
+  
+  // מציאת כל ההתאמות - כולל כל הבלוקים של כוכביות
+  let match;
+  const allMatches = [];
+  
+  // חיפוש בלוקים מלאים: *** טקסט ***
+  asteriskPatternFull.lastIndex = 0;
+  while ((match = asteriskPatternFull.exec(text)) !== null) {
+    allMatches.push(match[0].trim());
+  }
+  
+  // חיפוש בלוקים בהתחלה: *** טקסט (ללא כוכביות בסוף)
+  const startMatch = text.match(asteriskPatternStart);
+  if (startMatch && !allMatches.some(m => m.includes(startMatch[0]))) {
+    allMatches.push(startMatch[0].trim());
+  }
+  
+  // חיפוש בלוקים בסוף: טקסט *** (ללא כוכביות בהתחלה)
+  const endMatch = text.match(asteriskPatternEnd);
+  if (endMatch && !allMatches.some(m => m.includes(endMatch[0]))) {
+    allMatches.push(endMatch[0].trim());
+  }
+  
+  // אם יש התאמות, נשמור אותן כהערות
+  if (allMatches.length > 0) {
+    notes.push(...allMatches);
+    
+    // הסרת כל הטקסטים המוקפים בכוכביות
+    cleaned = cleaned.replace(asteriskPatternFull, '').trim();
+    cleaned = cleaned.replace(asteriskPatternStart, '').trim();
+    cleaned = cleaned.replace(asteriskPatternEnd, '').trim();
+    // ניקוי רווחים כפולים
+    cleaned = cleaned.replace(/\s+/g, ' ').trim();
+  }
+  
+  return {
+    cleaned: cleaned,
+    notes: notes.join(' ')
+  };
 }
 
 /**
@@ -720,14 +833,109 @@ export function parseExcelFile(file, supplierType) {
             }
             
             const dateStr = findColumn(row, ['תאריך', 'date', 'תאריך נסיעה']);
+            const timeStr = findColumn(row, ['שעה', 'time', 'זמן']);
+            
+            // חילוץ מקור ויעד עבור חורי - חיפוש בשמות שונים
+            // נסה גם שמות עם נקודה-פסיק או פורמטים שונים
+            // עבור חורי, מקור ויעד יכולים להיות בשדה אחד עם נקודה-פסיק או בשדות נפרדים
+            // חשוב: לא לחפש בשדות של זמן/תאריך
+            let sourceStr = findColumn(row, [
+              'מקור', 'source', 'מוצא', 'מקום איסוף', 'איסוף', 'pickup', 'from',
+              'איסוף:', 'מקור:', 'מוצא:', 'מקום איסוף:', 'איסוף:',
+              'מיקום איסוף', 'מאיפה', 'מאין', 'נקודת איסוף',
+              'נקודת התחלה', 'התחלה', 'start', 'start location', 'pickup location',
+              'מקור נסיעה', 'מקור הנסיעה', 'מקור (ספק)', 'מקור (חורי)'
+            ]);
+            // בדיקה: אם sourceStr נראה כמו שעה (פורמט HH:MM:SS או HH:MM), נאפס אותו
+            if (sourceStr && /^\d{1,2}:\d{2}(:\d{2})?$/.test(String(sourceStr).trim())) {
+              sourceStr = null;
+            }
+            let destinationStr = findColumn(row, [
+              'יעד', 'destination', 'dest', 'מקום פיזור', 'פיזור', 'dropoff', 'to',
+              'יעד:', 'מקום פיזור:', 'פיזור:', 'יעד (ספק)', 'מיקום פיזור',
+              'לאן', 'נקודת פיזור', 'נקודת סיום', 'סיום', 'end', 'end location',
+              'dropoff location', 'יעד נסיעה', 'יעד הנסיעה', 'יעד (חורי)'
+            ]);
+            // בדיקה: אם destinationStr נראה כמו שעה, נאפס אותו
+            if (destinationStr && /^\d{1,2}:\d{2}(:\d{2})?$/.test(String(destinationStr).trim())) {
+              destinationStr = null;
+            }
+            
+            // אם לא נמצאו בשדות נפרדים, ננסה לחפש בשדה משולב (עם נקודה-פסיק)
+            if (!sourceStr && !destinationStr) {
+              // נחפש שדה שמכיל גם "איסוף" וגם "פיזור" או "נתבג"
+              const combinedField = findColumn(row, ['מקור', 'יעד', 'מיקום', 'מיקום איסוף', 'מיקום פיזור', 'פיזור', 'איסוף']);
+              if (combinedField) {
+                const combinedStr = String(combinedField);
+                // ננסה לחלץ מקור ויעד משדה משולב
+                // פורמט אפשרי: "איסוף: X - פיזור: Y" או "X ; Y" או "X - Y"
+                if (combinedStr.includes('פיזור:') && combinedStr.includes('איסוף:')) {
+                  const pickupMatch = combinedStr.match(/איסוף:\s*([^פ-]+)/);
+                  const dropoffMatch = combinedStr.match(/פיזור:\s*([^א-]+)/);
+                  if (pickupMatch) sourceStr = pickupMatch[1].trim();
+                  if (dropoffMatch) destinationStr = dropoffMatch[1].trim();
+                } else if (combinedStr.includes(';')) {
+                  const parts = combinedStr.split(';');
+                  if (parts.length >= 2) {
+                    sourceStr = parts[0].trim();
+                    destinationStr = parts[1].trim();
+                  }
+                } else if (combinedStr.includes(' - ')) {
+                  const parts = combinedStr.split(' - ');
+                  if (parts.length >= 2) {
+                    sourceStr = parts[0].trim();
+                    destinationStr = parts[1].trim();
+                  }
+                }
+              }
+            }
+            
+            // חילוץ נוסעים עבור חורי
+            const passengersStr = findColumn(row, ['נוסעים', 'passengers', 'נוסע', 'שם נוסע', 'שמות נוסעים', 'שם', 'names']);
             
             // טיפול במחיר - שימוש בפונקציה משותפת
             const price = parsePrice(priceValue);
             
+            // חילוץ tripNumber עם בדיקה ל-NaN
+            let parsedTripNumber = null;
+            if (tripNumber !== null && tripNumber !== undefined && tripNumber !== '') {
+              if (typeof tripNumber === 'number') {
+                parsedTripNumber = tripNumber;
+              } else {
+                const cleaned = String(tripNumber).replace(/[^0-9]/g, '').trim();
+                if (cleaned.length > 0) {
+                  const parsed = parseInt(cleaned);
+                  parsedTripNumber = (!isNaN(parsed) && parsed > 0) ? parsed : null;
+                }
+              }
+            }
+            
+            // חילוץ הערות ממקור ויעד - אחרי כל העדכונים (אחרי parsedTripNumber מאותחל)
+            let sourceNotes = '';
+            let destNotes = '';
+            if (sourceStr) {
+              const sourceExtracted = extractSupplierNotes(String(sourceStr));
+              sourceStr = sourceExtracted.cleaned;
+              sourceNotes = sourceExtracted.notes;
+            }
+            if (destinationStr) {
+              const destExtracted = extractSupplierNotes(String(destinationStr));
+              destinationStr = destExtracted.cleaned;
+              destNotes = destExtracted.notes;
+            }
+            
+            // שילוב הערות ממקור ויעד
+            const supplierNotes = [sourceNotes, destNotes].filter(n => n && n.trim() !== '').join(' ').trim();
+            
             return {
-              tripNumber: tripNumber ? (typeof tripNumber === 'number' ? tripNumber : parseInt(String(tripNumber).replace(/[^0-9]/g, ''))) : null,
+              tripNumber: parsedTripNumber,
               price: price,
               date: dateStr || '',
+              time: timeStr || '',
+              source: sourceStr || '',
+              destination: destinationStr || '',
+              passengers: passengersStr || '',
+              supplierNotes: supplierNotes || '', // הערות ספק - טקסט מוקף בכוכביות
               rawData: row,
               index: index
             };
@@ -758,7 +966,13 @@ export function parseExcelFile(file, supplierType) {
             
             return !shouldFilter;
           } else if (supplierType === 'hori') {
-            if (item.tripNumber === null) return false;
+            // סינון נסיעות ללא tripNumber תקין (null, NaN, או 0)
+            // גם נסיעות עם מחיר אבל ללא tripNumber תקין - כנראה שורת סיכום או נסיעה לא תקינה
+            const hasInvalidTripNumber = item.tripNumber === null || isNaN(item.tripNumber) || item.tripNumber === 0;
+            
+            if (hasInvalidTripNumber) {
+              return false; // נסיעה זו תיסנן ולא תגיע ל-rideMatcher
+            }
             
             // בדיקה אם זה שורת סיכום
             const rawRow = item.rawData || {};

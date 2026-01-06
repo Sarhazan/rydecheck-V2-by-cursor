@@ -440,18 +440,85 @@ const DepartmentBreakdown = memo(function DepartmentBreakdown({
                                         </div>
                                       )
                                     ) : (
-                                      // עבור מחלקות אחרות - מציג את העובדים
-                                      item.departmentData.employees && item.departmentData.employees.length > 0
-                                        ? item.departmentData.employees
-                                            .map(emp => `${emp.firstName} ${emp.lastName}`)
-                                            .join(', ')
-                                        : '-'
+                                      // עבור מחלקות אחרות - מציג את כל העובדים עם הפרדה בין אלה מהמחלקה לאלה שלא
+                                      (() => {
+                                        const currentDepartment = dept.department;
+                                        const ride = item.ride;
+                                        
+                                        // אם אין PIDs, נציג רק את העובדים מהמחלקה
+                                        if (!ride.pids || ride.pids.length === 0) {
+                                          return item.departmentData.employees && item.departmentData.employees.length > 0
+                                            ? item.departmentData.employees
+                                                .map(emp => `${emp.firstName} ${emp.lastName}`)
+                                                .join(', ')
+                                            : '-';
+                                        }
+                                        
+                                        // קבלת כל העובדים מהנסיעה
+                                        const allEmployees = ride.pids
+                                          .map(pid => {
+                                            const pidNum = typeof pid === 'string' ? parseInt(pid) : pid;
+                                            const employee = employeeMap?.get(pidNum) || employeeMap?.get(pid) || employeeMap?.get(String(pid));
+                                            if (employee) {
+                                              return {
+                                                pid,
+                                                employee,
+                                                name: `${employee.firstName || ''} ${employee.lastName || ''}`.trim()
+                                              };
+                                            }
+                                            // אם אין ב-employeeMap, ננסה לחלץ מ-passengers
+                                            const nameFromPassengers = getEmployeeNameFromPassengers(pid, ride.passengers, ride.pids || []);
+                                            if (nameFromPassengers) {
+                                              return {
+                                                pid,
+                                                employee: null,
+                                                name: nameFromPassengers
+                                              };
+                                            }
+                                            return null;
+                                          })
+                                          .filter(Boolean);
+                                        
+                                        // הפרדה בין עובדים מהמחלקה לעובדים שלא מהמחלקה
+                                        const employeesInDepartment = [];
+                                        const employeesNotInDepartment = [];
+                                        
+                                        allEmployees.forEach(({ employee, name }) => {
+                                          if (employee && employee.department === currentDepartment) {
+                                            employeesInDepartment.push(name);
+                                          } else {
+                                            employeesNotInDepartment.push(name);
+                                          }
+                                        });
+                                        
+                                        // אם אין עובדים בכלל
+                                        if (employeesInDepartment.length === 0 && employeesNotInDepartment.length === 0) {
+                                          return '-';
+                                        }
+                                        
+                                        // בניית JSX element
+                                        return (
+                                          <span>
+                                            {employeesInDepartment.length > 0 && (
+                                              <span>{employeesInDepartment.join(', ')}</span>
+                                            )}
+                                            {employeesNotInDepartment.length > 0 && (
+                                              <>
+                                                {employeesInDepartment.length > 0 && ' '}
+                                                <span className="text-blue-600">
+                                                  ({employeesNotInDepartment.join(' , ')})
+                                                </span>
+                                              </>
+                                            )}
+                                          </span>
+                                        );
+                                      })()
                                     )}
                                   </td>
-                                  <td className="px-4 py-3 text-sm font-semibold text-gray-900">
+                                  <td className="px-4 py-3 text-sm font-semibold text-blue-600">
                                     ₪{item.ride.price.toFixed(2)}
                                   </td>
-                                  <td className={`px-4 py-3 text-sm font-bold ${isNoDepartment ? 'text-red-600' : 'text-blue-600'}`}>
+                                  <td className={`px-4 py-3 text-sm font-bold ${isNoDepartment ? 'text-red-600' : 'text-gray-900'}`}>
                                     ₪{item.departmentData.price.toFixed(2)}
                                   </td>
                                 </motion.tr>

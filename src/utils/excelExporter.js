@@ -178,3 +178,222 @@ export function exportAnalysisReport(matchResults, rideNotes = new Map()) {
   // הורדה
   XLSX.writeFile(wb, `דוח_התאמות_${new Date().toISOString().split('T')[0]}.xlsx`);
 }
+
+/**
+ * חילוץ שם עובד עם "חריג" ממחרוזת נוסעים
+ * @param {string} passengersStr - מחרוזת נוסעים
+ * @returns {string|null} שם העובד עם "חריג" או null
+ */
+function extractExceptionalEmployeeName(passengersStr) {
+  if (!passengersStr) return null;
+  
+  const str = String(passengersStr).trim();
+  if (!str) return null;
+  
+  // פיצול לפי נקודה-פסיק
+  const parts = str.split(/[;]\s*/).map(part => part.trim()).filter(part => part !== '');
+  
+  // חיפוש חלק שמכיל "חריג"
+  const exceptionalPart = parts.find(part => part.includes('חריג'));
+  
+  if (!exceptionalPart) return null;
+  
+  // החזרת השם המלא עם "חריג"
+  return exceptionalPart.trim();
+}
+
+/**
+ * ייצוא נסיעות חריג מקובצות לפי שם העובד
+ * @param {Array} exceptionalRides - מערך של נסיעות חריג
+ */
+export function exportExceptionalRides(exceptionalRides) {
+  if (!exceptionalRides || exceptionalRides.length === 0) {
+    alert('אין נסיעות חריג לייצוא');
+    return;
+  }
+  
+  // קיבוץ נסיעות לפי שם העובד עם "חריג"
+  const employeesMap = new Map();
+  
+  exceptionalRides.forEach(ride => {
+    const passengersStr = ride.passengers || '';
+    const employeeName = extractExceptionalEmployeeName(passengersStr);
+    
+    if (employeeName) {
+      if (!employeesMap.has(employeeName)) {
+        employeesMap.set(employeeName, []);
+      }
+      employeesMap.get(employeeName).push(ride);
+    }
+  });
+  
+  // יצירת מערך נתונים ל-Excel
+  const excelData = [];
+  
+  employeesMap.forEach((rides, employeeName) => {
+    // הוספת שורת כותרת עם שם העובד
+    excelData.push({
+      'שם העובד': employeeName,
+      'מספר נסיעה': '',
+      'תאריך': '',
+      'מוצא': '',
+      'יעד': '',
+      'נוסעים': '',
+      'ספק': ''
+    });
+    
+    // הוספת כותרות עמודות
+    excelData.push({
+      'שם העובד': '',
+      'מספר נסיעה': 'מספר נסיעה',
+      'תאריך': 'תאריך',
+      'מוצא': 'מוצא',
+      'יעד': 'יעד',
+      'נוסעים': 'נוסעים',
+      'ספק': 'ספק'
+    });
+    
+    // הוספת כל הנסיעות של העובד
+    rides.forEach(ride => {
+      excelData.push({
+        'שם העובד': '',
+        'מספר נסיעה': ride.rideId || '',
+        'תאריך': ride.date || '',
+        'מוצא': ride.source || '',
+        'יעד': ride.destination || '',
+        'נוסעים': ride.passengers || '',
+        'ספק': ride.supplier || ''
+      });
+    });
+    
+    // הוספת שורה ריקה בין עובדים
+    excelData.push({
+      'שם העובד': '',
+      'מספר נסיעה': '',
+      'תאריך': '',
+      'מוצא': '',
+      'יעד': '',
+      'נוסעים': '',
+      'ספק': ''
+    });
+  });
+  
+  // יצירת workbook
+  const ws = XLSX.utils.json_to_sheet(excelData);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'נסיעות חריג');
+  
+  // הגדרת רוחב עמודות
+  const colWidths = [
+    { wch: 40 }, // שם העובד
+    { wch: 15 }, // מספר נסיעה
+    { wch: 18 }, // תאריך
+    { wch: 30 }, // מוצא
+    { wch: 30 }, // יעד
+    { wch: 40 }, // נוסעים
+    { wch: 20 }  // ספק
+  ];
+  ws['!cols'] = colWidths;
+  
+  // הורדה
+  XLSX.writeFile(wb, `נסיעות_חריג_${new Date().toISOString().split('T')[0]}.xlsx`);
+}
+
+/**
+ * ייצוא נסיעות אורח לקובץ Excel
+ * @param {Array} guestRides - מערך של נסיעות אורח
+ */
+export function exportGuestRides(guestRides) {
+  if (!guestRides || guestRides.length === 0) {
+    alert('אין נסיעות אורח לייצוא');
+    return;
+  }
+  
+  // יצירת מערך נתונים ל-Excel
+  const excelData = guestRides.map(ride => ({
+    'מספר נסיעה': ride.rideId || '',
+    'תאריך': ride.date || '',
+    'מוצא': ride.source || '',
+    'יעד': ride.destination || '',
+    'נוסעים': ride.passengers || '',
+    'ספק': ride.supplier || '',
+    'מחיר': typeof ride.price === 'number' ? ride.price.toFixed(2) : (ride.price || ''),
+    'הערות': ride.notes || ''
+  }));
+  
+  // יצירת workbook
+  const ws = XLSX.utils.json_to_sheet(excelData);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'נסיעות אורח');
+  
+  // הגדרת רוחב עמודות
+  const colWidths = [
+    { wch: 15 }, // מספר נסיעה
+    { wch: 18 }, // תאריך
+    { wch: 30 }, // מוצא
+    { wch: 30 }, // יעד
+    { wch: 40 }, // נוסעים
+    { wch: 20 }, // ספק
+    { wch: 15 }, // מחיר
+    { wch: 50 }  // הערות
+  ];
+  ws['!cols'] = colWidths;
+  
+  // הורדה
+  XLSX.writeFile(wb, `נסיעות_אורח_${new Date().toISOString().split('T')[0]}.xlsx`);
+}
+
+/**
+ * ייצוא נסיעות חסר בספק לקובץ Excel
+ * @param {Array} missingInSupplierMatches - מערך של התאמות עם סטטוס missing_in_supplier
+ * @param {string} supplier - שם הספק
+ */
+export function exportMissingInSupplier(missingInSupplierMatches, supplier) {
+  if (!missingInSupplierMatches || missingInSupplierMatches.length === 0) {
+    alert('אין נסיעות חסר בספק לייצוא');
+    return;
+  }
+  
+  // יצירת מערך נתונים ל-Excel
+  const excelData = missingInSupplierMatches
+    .filter(match => match.ride) // רק נסיעות שיש להן ride
+    .map(match => ({
+      'קוד נסיעה': match.ride.rideId || '',
+      'תאריך': match.ride.date || '',
+      'מקור': match.ride.source || '',
+      'יעד': match.ride.destination || '',
+      'מחיר': typeof match.ride.price === 'number' ? match.ride.price.toFixed(2) : (match.ride.price || '')
+    }));
+  
+  if (excelData.length === 0) {
+    alert('אין נסיעות חסר בספק לייצוא');
+    return;
+  }
+  
+  // יצירת workbook
+  const ws = XLSX.utils.json_to_sheet(excelData);
+  const wb = XLSX.utils.book_new();
+  
+  // שם הספק בעברית
+  const supplierNames = {
+    bontour: 'בון_תור',
+    hori: 'חורי',
+    gett: 'גט'
+  };
+  const supplierName = supplierNames[supplier] || supplier;
+  
+  XLSX.utils.book_append_sheet(wb, ws, 'חסר בספק');
+  
+  // הגדרת רוחב עמודות
+  const colWidths = [
+    { wch: 15 }, // קוד נסיעה
+    { wch: 20 }, // תאריך
+    { wch: 30 }, // מקור
+    { wch: 30 }, // יעד
+    { wch: 15 }  // מחיר
+  ];
+  ws['!cols'] = colWidths;
+  
+  // הורדה
+  XLSX.writeFile(wb, `חסר_בספק_${supplierName}_${new Date().toISOString().split('T')[0]}.xlsx`);
+}
