@@ -293,14 +293,21 @@ export function parseRideFile(data, filename) {
  */
 export function parseEmployeesFile(data) {
   return new Promise((resolve, reject) => {
-    Papa.parse(data, {
+    // ניקוי הנתונים לפני פרסור - הסרת פסיקים נגררים בסוף שורות
+    const cleanedData = data
+      .replace(/^\uFEFF/, '') // הסרת BOM מתחילת הקובץ
+      .split('\n')
+      .map(line => line.replace(/,\s*$/, '')) // הסרת פסיק נגרר בסוף כל שורה
+      .join('\n');
+
+    Papa.parse(cleanedData, {
       header: true,
       skipEmptyLines: true,
       encoding: 'UTF-8',
-      // ניקוי שמות עמודות - הסרת BOM, מירכאות ורווחים מיותרים
+      // ניקוי שמות עמודות - הסרת מירכאות ורווחים מיותרים
       transformHeader: (header) => {
         return header
-          .replace(/^\uFEFF/, '') // הסרת BOM
+          .replace(/^\uFEFF/, '') // הסרת BOM (לכל מקרה)
           .replace(/^["']|["']$/g, '') // הסרת מירכאות
           .trim();
       },
