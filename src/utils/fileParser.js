@@ -306,6 +306,16 @@ export function parseEmployeesFile(data) {
       },
       complete: (results) => {
         try {
+          // DEBUG: הדפסת מידע על הפרסור
+          if (results.data.length > 0) {
+            const firstRow = results.data[0];
+            const keys = Object.keys(firstRow);
+            console.log('=== Employee File Debug ===');
+            console.log('Total rows:', results.data.length);
+            console.log('Column names:', keys);
+            console.log('First row sample:', firstRow);
+          }
+
           const employees = results.data.map(row => {
             // חיפוש גמיש של עמודת _ID - יכולה להיות בכמה שמות
             const keys = Object.keys(row);
