@@ -313,20 +313,6 @@ export function parseEmployeesFile(data) {
       },
       complete: (results) => {
         try {
-          // DEBUG: הדפסת מידע על הפרסור
-          console.log('=== Employee File Debug ===');
-          console.log('Total rows:', results.data.length);
-          console.log('Meta fields:', results.meta.fields);
-          console.log('Errors:', results.errors);
-          if (results.data.length > 0) {
-            const firstRow = results.data[0];
-            const keys = Object.keys(firstRow);
-            console.log('First row keys:', keys);
-            console.log('First row sample:', firstRow);
-          } else {
-            console.log('NO DATA PARSED!');
-          }
-
           const employees = results.data.map(row => {
             // חיפוש גמיש של עמודת _ID - יכולה להיות בכמה שמות
             const keys = Object.keys(row);
