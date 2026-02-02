@@ -297,22 +297,41 @@ export function parseEmployeesFile(data) {
       header: true,
       skipEmptyLines: true,
       encoding: 'UTF-8',
+      // ניקוי שמות עמודות - הסרת BOM, מירכאות ורווחים מיותרים
+      transformHeader: (header) => {
+        return header
+          .replace(/^\uFEFF/, '') // הסרת BOM
+          .replace(/^["']|["']$/g, '') // הסרת מירכאות
+          .trim();
+      },
       complete: (results) => {
         try {
-          const employees = results.data.map(row => ({
-            employeeId: row._ID ? parseInt(row._ID) : null,
-            firstName: row['שם פרטי'] || '',
-            lastName: row['שם משפחה'] || '',
-            department: row.מחלקה || '',
-            rawData: row
-          })).filter(emp => emp.employeeId !== null);
-          
+          const employees = results.data.map(row => {
+            // חיפוש גמיש של עמודת _ID - יכולה להיות בכמה שמות
+            const keys = Object.keys(row);
+            const idKey = keys.find(k => {
+              const cleanKey = k.replace(/^\uFEFF/, '').replace(/^["']|["']$/g, '').trim();
+              return cleanKey === '_ID' || cleanKey === 'ID' || cleanKey === 'id';
+            });
+
+            const employeeIdRaw = idKey ? row[idKey] : null;
+            const employeeId = employeeIdRaw ? parseInt(String(employeeIdRaw).replace(/[^0-9]/g, '')) : null;
+
+            return {
+              employeeId: (!isNaN(employeeId) && employeeId > 0) ? employeeId : null,
+              firstName: row['שם פרטי'] || '',
+              lastName: row['שם משפחה'] || '',
+              department: row.מחלקה || row['מחלקה'] || '',
+              rawData: row
+            };
+          }).filter(emp => emp.employeeId !== null);
+
           // יצירת מפה מהירה לחיפוש לפי ID
           const employeeMap = new Map();
           employees.forEach(emp => {
             employeeMap.set(emp.employeeId, emp);
           });
-          
+
           resolve({ employees, employeeMap });
         } catch (error) {
           reject(error);
