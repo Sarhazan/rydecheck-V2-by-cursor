@@ -167,10 +167,13 @@ function processRidesData(data, resolve, headers = []) {
       }
     }
 
+    const passengerCountValue = Number.parseInt(String(cleanRow['מס. נוסעים'] ?? '').trim(), 10);
+
     const rideData = {
       rideId: isNaN(rideId) ? null : rideId,
       date: dateValue,
       passengers: cleanRow.נוסעים || '',
+      passengerCount: Number.isNaN(passengerCountValue) ? null : passengerCountValue,
       pids: allPids,
       source: cleanRow.מוצא || '',
       destination: cleanRow.יעד || '',

@@ -7,6 +7,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 // Icons
 import { AlertTriangle, Edit2, Check, X, RefreshCw, Trash2, Download } from 'lucide-react';
+import { isRideWithoutPassengers } from '../utils/reviewCategories';
 
 /**
  * קומפוננטה להצגת נסיעות לבדיקה (מחיר אפס או נוסע 55555)
@@ -97,14 +98,7 @@ const ZeroPriceRides = memo(function ZeroPriceRides({
 
   // סינון נסיעות ללא נוסעים
   const ridesWithoutPassengers = useMemo(() => {
-    return rides.filter(ride => {
-      // בדיקה אם אין PIDs או שהמערך ריק
-      const hasPids = ride.pids && Array.isArray(ride.pids) && ride.pids.length > 0;
-      // בדיקה אם אין נוסעים בשדה נוסעים
-      const hasPassengers = ride.passengers && String(ride.passengers).trim() !== '';
-      // נסיעה ללא נוסעים = אין PIDs ואין נוסעים
-      return !hasPids && !hasPassengers;
-    });
+    return rides.filter(ride => isRideWithoutPassengers(ride));
   }, [rides]);
 
   // סינון נסיעות אורח (קוד נוסע 12548 או "אורח אורח")
