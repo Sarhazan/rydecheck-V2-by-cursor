@@ -3,6 +3,24 @@ import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
 import { GETT_EMPTY_COLUMN_MAPPING, GETT_COLUMN_NAMES } from './gettConstants.js';
 
+const SUMMARY_KEYWORDS = ['סה"כ', 'סיכום', 'סה"כ נסיעות', 'total', 'summary', 'סה"כ מחיר', 'סה"כ סכום', 'סה"כ מחירים'];
+
+/**
+ * בדיקה אם שורה היא שורת סיכום (על סמך ערכים לא-ריקים בלבד)
+ * מונע false positive מערכים ריקים (''), שבעבר עברו בגלל keyword.includes('')
+ */
+export function isSummaryRow(rawRow = {}) {
+  const allValues = Object.values(rawRow)
+    .map(v => String(v ?? '').trim().toLowerCase())
+    .filter(v => v.length > 0);
+
+  if (allValues.length === 0) return true;
+
+  return allValues.some(val => {
+    return SUMMARY_KEYWORDS.some(keyword => val.includes(keyword));
+  });
+}
+
 /**
  * חילוץ מספרי עובדים (PIDs) משדה ההיסטוריה
  * @param {string} historyField - שדה ההיסטוריה המכיל את ה-PIDs בפורמט |pids=123,456|
@@ -418,6 +436,27 @@ function parsePrice(priceValue) {
 }
 
 /**
+ * חילוץ מספר נסיעה מחורי - עדיפות לקוד נסיעה
+ */
+export function parseHoriTripNumber(row) {
+  const tripRaw = findColumn(row, ['קוד נסיעה', 'מספר נסיעה', 'מספר נסיעה ', 'trip number', 'מספר', 'מספר הזמנה', 'מספר ויזה']);
+
+  if (tripRaw === null || tripRaw === undefined || tripRaw === '') {
+    return null;
+  }
+
+  if (typeof tripRaw === 'number') {
+    return (!isNaN(tripRaw) && tripRaw !== 0) ? tripRaw : null;
+  }
+
+  const cleaned = String(tripRaw).replace(/[^0-9]/g, '').trim();
+  if (!cleaned) return null;
+
+  const parsed = parseInt(cleaned);
+  return (!isNaN(parsed) && parsed !== 0) ? parsed : null;
+}
+
+/**
  * חילוץ הערות ספק - טקסט מוקף בכוכביות (*** או יותר)
  * הפונקציה מסירה טקסט מוקף בכוכביות מהמחרוזת ומחזירה את הטקסט המנוקה ואת ההערות שהוסרו
  * 
@@ -700,6 +739,7 @@ export function parseExcelFile(file, supplierType) {
         const worksheet = workbook.Sheets[firstSheetName];
         
         let parsedData = [];
+        let horiHeaderRowIndex = 0;
         
         if (supplierType === 'gett') {
           // גט: דילוג על 15 שורות ראשונות (שורה 16 = תחילת נתונים)
@@ -742,6 +782,7 @@ export function parseExcelFile(file, supplierType) {
               break;
             }
           }
+          horiHeaderRowIndex = headerRowIndex;
           
           // אם מצאנו שורת כותרות שלא בשורה 0, נמיר את הנתונים ידנית
           if (headerRowIndex >= 0 && headerRowIndex < allData.length) {
@@ -775,6 +816,10 @@ export function parseExcelFile(file, supplierType) {
           parsedData = jsonData;
         }
         
+        if (supplierType === 'hori') {
+          console.info(`[Hori parse] parsed rows before normalization/filter: ${parsedData.length}`);
+        }
+
         let autoPriceColumnKey = null;
         if (parsedData.length > 0) {
           const firstRow = parsedData[0];
@@ -849,7 +894,7 @@ export function parseExcelFile(file, supplierType) {
               index: index
             };
           } else if (supplierType === 'hori') {
-            const tripNumber = findColumn(row, ['מספר נסיעה', 'מספר נסיעה ', 'trip number', 'מספר', 'מספר הזמנה', 'מספר ויזה']);
+            const tripNumber = parseHoriTripNumber(row);
             // עדיפות ל-"סה"כ ללקוח-לפני מע"מ" עבור חורי (חודש 09.25)
             let priceValue = findColumn(row, ['סה"כ ללקוח-לפני מע"מ', 'מחיר', 'סכום', 'price', 'amount', 'total', 'מחיר כולל', 'סך הכל', 'מחיר סופי', 'סה"כ', 'מחיר לתשלום']);
             
@@ -963,6 +1008,7 @@ export function parseExcelFile(file, supplierType) {
               passengers: passengersStr || '',
               supplierNotes: supplierNotes || '', // הערות ספק - טקסט מוקף בכוכביות
               rawData: row,
+              sourceRowNumber: (horiHeaderRowIndex + 2 + index),
               index: index
             };
           } else if (supplierType === 'gett') {
@@ -993,20 +1039,15 @@ export function parseExcelFile(file, supplierType) {
             return !shouldFilter;
           } else if (supplierType === 'hori') {
             // סינון נסיעות ללא tripNumber תקין (null, NaN, או 0)
-            // גם נסיעות עם מחיר אבל ללא tripNumber תקין - כנראה שורת סיכום או נסיעה לא תקינה
             const hasInvalidTripNumber = item.tripNumber === null || isNaN(item.tripNumber) || item.tripNumber === 0;
-            
             if (hasInvalidTripNumber) {
-              return false; // נסיעה זו תיסנן ולא תגיע ל-rideMatcher
+              return false;
             }
-            
-            // בדיקה אם זה שורת סיכום
+
+            // בדיקה אם זו שורת סיכום אמיתית
             const rawRow = item.rawData || {};
-            const allValues = Object.values(rawRow).map(v => String(v || '').toLowerCase().trim());
-            const summaryKeywords = ['סה"כ', 'סיכום', 'סה"כ נסיעות', 'total', 'summary', 'סה"כ מחיר'];
-            const isSummaryRow = allValues.some(val => summaryKeywords.some(keyword => val.includes(keyword) || keyword.includes(val)));
-            
-            return !isSummaryRow;
+            const isSummary = isSummaryRow(rawRow);
+            return !isSummary;
           } else if (supplierType === 'gett') {
             const shouldInclude = item.date || item.source || item.destination;
             return shouldInclude;
@@ -1014,6 +1055,34 @@ export function parseExcelFile(file, supplierType) {
           return true;
         });
         
+        if (supplierType === 'hori') {
+          const droppedRows = [];
+          parsedData.forEach((row, index) => {
+            const sourceRowNumber = horiHeaderRowIndex + 2 + index;
+            const tripRaw = findColumn(row, ['קוד נסיעה', 'מספר נסיעה', 'מספר נסיעה ', 'trip number', 'מספר', 'מספר הזמנה', 'מספר ויזה']);
+            const parsedTripNumber = parseHoriTripNumber(row);
+
+            const invalidTripNumber = parsedTripNumber === null || isNaN(parsedTripNumber) || parsedTripNumber === 0;
+            const summary = isSummaryRow(row);
+
+            if (invalidTripNumber || summary) {
+              droppedRows.push({
+                sourceRowNumber,
+                tripRaw: tripRaw ?? '',
+                reason: invalidTripNumber ? 'invalid_trip_number' : 'summary_row',
+                price: findColumn(row, ['סה"כ ללקוח-לפני מע"מ', 'מחיר', 'סכום', 'סה"כ']) || 0,
+                description: findColumn(row, ['תאור', 'תיאור', 'description']) || ''
+              });
+            }
+          });
+
+          console.info(`[Hori parse] rows after normalization/filter: ${normalized.length}`);
+          console.info(`[Hori parse] dropped rows: ${droppedRows.length}`);
+          if (droppedRows.length > 0) {
+            console.info('[Hori parse] dropped rows details:', droppedRows);
+          }
+        }
+
         resolve(normalized);
       } catch (error) {
         reject(error);
