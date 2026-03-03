@@ -436,24 +436,47 @@ function parsePrice(priceValue) {
 }
 
 /**
- * חילוץ מספר נסיעה מחורי - עדיפות לקוד נסיעה
+ * חילוץ ערך מזהה מספרי מחורי
  */
-export function parseHoriTripNumber(row) {
-  const tripRaw = findColumn(row, ['קוד נסיעה', 'מספר נסיעה', 'מספר נסיעה ', 'trip number', 'מספר', 'מספר הזמנה', 'מספר ויזה']);
+function parseHoriNumericField(row, columnNames) {
+  const raw = findColumn(row, columnNames);
 
-  if (tripRaw === null || tripRaw === undefined || tripRaw === '') {
+  if (raw === null || raw === undefined || raw === '') {
     return null;
   }
 
-  if (typeof tripRaw === 'number') {
-    return (!isNaN(tripRaw) && tripRaw !== 0) ? tripRaw : null;
+  if (typeof raw === 'number') {
+    return (!isNaN(raw) && raw !== 0) ? raw : null;
   }
 
-  const cleaned = String(tripRaw).replace(/[^0-9]/g, '').trim();
+  const cleaned = String(raw).replace(/[^0-9]/g, '').trim();
   if (!cleaned) return null;
 
   const parsed = parseInt(cleaned);
   return (!isNaN(parsed) && parsed !== 0) ? parsed : null;
+}
+
+/**
+ * חילוץ מספר ויזה מחורי
+ */
+export function parseHoriVisaNumber(row) {
+  return parseHoriNumericField(row, ['מספר ויזה', 'visa number', 'ויזה']);
+}
+
+/**
+ * חילוץ קוד נסיעה מחורי
+ */
+export function parseHoriRideCode(row) {
+  return parseHoriNumericField(row, ['קוד נסיעה', 'מספר נסיעה', 'מספר נסיעה ', 'trip number', 'מספר', 'מספר הזמנה']);
+}
+
+/**
+ * חילוץ מספר נסיעה מחורי - ברירת מחדל (תואם להתנהגות הקיימת)
+ */
+export function parseHoriTripNumber(row) {
+  const rideCode = parseHoriRideCode(row);
+  if (rideCode !== null) return rideCode;
+  return parseHoriVisaNumber(row);
 }
 
 /**
@@ -895,6 +918,8 @@ export function parseExcelFile(file, supplierType) {
             };
           } else if (supplierType === 'hori') {
             const tripNumber = parseHoriTripNumber(row);
+            const visaNumber = parseHoriVisaNumber(row);
+            const tripCode = parseHoriRideCode(row);
             // עדיפות ל-"סה"כ ללקוח-לפני מע"מ" עבור חורי (חודש 09.25)
             let priceValue = findColumn(row, ['סה"כ ללקוח-לפני מע"מ', 'מחיר', 'סכום', 'price', 'amount', 'total', 'מחיר כולל', 'סך הכל', 'מחיר סופי', 'סה"כ', 'מחיר לתשלום']);
             
@@ -1000,6 +1025,8 @@ export function parseExcelFile(file, supplierType) {
             
             return {
               tripNumber: parsedTripNumber,
+              visaNumber: visaNumber,
+              tripCode: tripCode,
               price: price,
               date: dateStr || '',
               time: timeStr || '',

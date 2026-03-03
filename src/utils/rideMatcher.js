@@ -380,37 +380,37 @@ export function matchHoriToRides(horiData, rides) {
   });
   const matchedRideIds = new Set();
   
+  const collectCandidateIds = (hori) => {
+    const normalizeId = (value) => {
+      if (value === null || value === undefined || value === '') return null;
+      if (typeof value === 'number') return (!isNaN(value) && value !== 0) ? value : null;
+      const cleaned = String(value).replace(/[^0-9]/g, '').trim();
+      if (!cleaned) return null;
+      const parsed = parseInt(cleaned);
+      return (!isNaN(parsed) && parsed !== 0) ? parsed : null;
+    };
+
+    // עדיפות דטרמיניסטית:
+    // 1) מספר ויזה (ממופה לרוב ל-rideId),
+    // 2) tripNumber (התנהגות קיימת),
+    // 3) tripCode מפורש (fallback)
+    const ordered = [hori.visaNumber, hori.tripNumber, hori.tripCode]
+      .map(normalizeId)
+      .filter(v => v !== null);
+
+    return [...new Set(ordered)];
+  };
+
   // עוברים על כל נסיעות חורי (הספק הגיש לרייד)
   horiData.forEach(hori => {
-    const rideId = hori.tripNumber;
-    
-    // בדיקה אם tripNumber תקין לפני חיפוש
-    // מסננים: null, undefined, NaN, 0, מחרוזת ריקה, או כל ערך לא תקין
-    const isValidTripNumber = rideId !== null && 
-                              rideId !== undefined && 
-                              rideId !== '' && 
-                              !isNaN(rideId) && 
-                              rideId !== 0 &&
-                              (typeof rideId === 'number' || (typeof rideId === 'string' && rideId.trim().length > 0 && !isNaN(parseInt(rideId))));
-    
+    const candidateIds = collectCandidateIds(hori);
+
     let matchedRide = null;
     let matchConfidence = 1.0;
-    
-    if (isValidTripNumber) {
-      // ניסיון התאמה לפי tripNumber - ננסה גם כמספר וגם כמחרוזת
-      matchedRide = rideMap.get(rideId);
-      if (!matchedRide) {
-        // ננסה כמספר אם rideId הוא מחרוזת
-        if (typeof rideId === 'string') {
-          const numId = parseInt(rideId);
-          if (!isNaN(numId)) {
-            matchedRide = rideMap.get(numId);
-          }
-        } else if (typeof rideId === 'number') {
-          // ננסה כמחרוזת אם rideId הוא מספר
-          matchedRide = rideMap.get(String(rideId));
-        }
-      }
+
+    for (const candidateId of candidateIds) {
+      matchedRide = rideMap.get(candidateId) || rideMap.get(String(candidateId));
+      if (matchedRide) break;
     }
     
     // אם לא נמצא לפי tripNumber, ננסה התאמה לפי תאריך ומחיר 100 (רק לנסיעות עם מחיר 100)
