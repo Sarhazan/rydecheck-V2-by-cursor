@@ -534,7 +534,7 @@ const AnalysisResults = memo(function AnalysisResults({ matchResults, employeeMa
           </motion.div>
         </motion.div>
         
-        {selectedSupplier === 'gett' && (
+        {(selectedSupplier === 'gett' || selectedSupplier === 'bontour' || selectedSupplier === 'hori') && (
           <motion.div 
             className="card-modern bg-gradient-to-br from-purple-50 to-purple-100 border border-purple-200"
             variants={cardVariants}
@@ -617,7 +617,7 @@ const AnalysisResults = memo(function AnalysisResults({ matchResults, employeeMa
           <option value="matched">תואם</option>
           <option value="price_difference">הפרש מחיר</option>
           <option value="missing_in_ride">חסר ברייד</option>
-          {selectedSupplier === 'gett' && (
+          {(selectedSupplier === 'gett' || selectedSupplier === 'bontour' || selectedSupplier === 'hori') && (
             <option value="missing_in_ride_or_assigned_to_other">חסר ברייד / רשום על ספק אחר</option>
           )}
           <option value="missing_in_supplier">חסר בספק</option>
@@ -887,7 +887,16 @@ const AnalysisResults = memo(function AnalysisResults({ matchResults, employeeMa
                         {selectedSupplier !== 'hori' && (
                           <td className="px-4 py-4 text-sm text-gray-900">
                             <div className="flex flex-col gap-1">
-                            {match.supplierData ? getEmployeeNames(match.supplierData.passengers) : '-'}
+                              {(() => {
+                                // בגט נשתמש בשדה passengers מהספק,
+                                // בבון תור / חורי נשתמש בנוסעים מרייד (עמודה L בקובץ רייד)
+                                const passengersSource = selectedSupplier === 'gett'
+                                  ? (match.supplierData ? match.supplierData.passengers : '')
+                                  : (match.ride ? match.ride.passengers : '');
+                                return passengersSource
+                                  ? getEmployeeNames(passengersSource)
+                                  : '-';
+                              })()}
                               {selectedSupplier === 'gett' && 
                                match.supplierData && 
                                match.supplierData.price === 28 && (

@@ -62,20 +62,13 @@ export function filterByStatus(results, statusFilter, supplier) {
       // רק נסיעות ללא ride
       return !r.ride && r.status === 'missing_in_ride';
     });
-  } else if (supplier === 'gett' && statusFilter === 'missing_in_ride_or_assigned_to_other') {
-    // עבור גט + missing_in_ride_or_assigned_to_other: נסיעות שיש להן ride ששייך לספק אחר
+  } else if (statusFilter === 'missing_in_ride_or_assigned_to_other' && (supplier === 'bontour' || supplier === 'hori' || supplier === 'gett')) {
+    // נסיעות שיש להן ride אבל הספק ברייד הוא ספק אחר ("רשום על ספק אחר")
     return results.filter(r => {
-      if (!r.supplierData) return false;
-      // צריך שיהיה ride
-      if (!r.ride) return false;
-      
-      const rideSupplier = (r.ride.supplier || '').trim().toLowerCase();
-      // אם ה-ride שייך לספק אחר (לא גט), נכלול אותו
-      if (rideSupplier && !rideSupplier.includes('gett') && !rideSupplier.includes('גט')) {
-        return true;
-      }
-      
-      return false;
+      if (!r.supplierData || !r.ride) return false;
+      const rideSupplier = r.ride.supplier || '';
+      // נכלול רק נסיעות שהספק ב-ride שייך לספק אחר (לא supplier הנוכחי)
+      return !rideBelongsToSupplier(rideSupplier, supplier) && !!rideSupplier.trim();
     });
   } else {
     return results.filter(r => r.status === statusFilter);
@@ -146,39 +139,54 @@ export function getMissingInRideCount(results, supplier, manualGettMatches = new
  * @param {Map} manualGettMatches - מפה של התאמות ידניות של גט (Map<rideId, orderNumber>)
  * @returns {number} מספר נסיעות עם ride ששייך לספק אחר
  */
+// דפוסי שמות ספק כפי שמופיעים ברייד
+const SUPPLIER_RIDE_PATTERNS = {
+  bontour: ['בון תור', 'בוןתור', 'צוות גיל'],
+  hori: ['מוניות דוד חורי', 'חורי', 'דוד חורי', 'מוניות דוד חורי בעמ'],
+  gett: ['gett', 'גט', 'GETT']
+};
+
+function rideBelongsToSupplier(rideSupplierRaw, supplierKey) {
+  const patterns = SUPPLIER_RIDE_PATTERNS[supplierKey] || [];
+  const rideSupplier = (rideSupplierRaw || '').trim().toLowerCase();
+  if (!rideSupplier) return false;
+  return patterns.some(pattern => {
+    const patternLower = pattern.toLowerCase();
+    return rideSupplier.includes(patternLower) ||
+           patternLower.includes(rideSupplier) ||
+           rideSupplier === patternLower;
+  });
+}
+
 export function getAssignedToOtherSupplierCount(results, supplier, manualGettMatches = new Map()) {
-  if (supplier === 'gett') {
-    const filtered = results.filter(r => {
-      if (!r.supplierData) return false;
-      
-      // צריך שיהיה ride
-      const hasRide = !!r.ride;
-      if (!hasRide) {
-        return false;
-      }
-      
-      const rideSupplier = (r.ride.supplier || '').trim().toLowerCase();
-      // אם ה-ride שייך לגט, זה לא "רשום על ספק אחר"
-      if (rideSupplier && (rideSupplier.includes('gett') || rideSupplier.includes('גט'))) {
-        return false;
-      }
-      
-      // אם ה-ride שייך לספק אחר, זה "רשום על ספק אחר"
-      if (rideSupplier && !rideSupplier.includes('gett') && !rideSupplier.includes('גט')) {
-        // לא נספר נסיעות שהותאמו ידנית (כי הן כבר מתואמות)
-        const gettOrderNumber = r.supplierData?.orderNumber || r.supplierData?.orderId;
-        const isManuallyMatched = Array.from(manualGettMatches.values()).includes(gettOrderNumber);
-        if (isManuallyMatched) {
-          return false;
-        }
-        return true;
-      }
-      
-      return false;
-    });
-    return filtered.length;
+  if (supplier !== 'bontour' && supplier !== 'hori' && supplier !== 'gett') {
+    return 0;
   }
-  return 0; // רק עבור גט
+
+  const filtered = results.filter(r => {
+    if (!r.supplierData) return false;
+    if (!r.ride) return false;
+
+    const rideSupplier = r.ride.supplier || '';
+
+    // אם הנסיעה שייכת לספק הנוכחי – זה לא "רשום על ספק אחר"
+    if (rideBelongsToSupplier(rideSupplier, supplier)) {
+      return false;
+    }
+
+    // עבור גט – לא לכלול נסיעות שהותאמו ידנית
+    if (supplier === 'gett') {
+      const gettOrderNumber = r.supplierData?.orderNumber || r.supplierData?.orderId;
+      const isManuallyMatched = Array.from(manualGettMatches.values()).includes(gettOrderNumber);
+      if (isManuallyMatched) {
+        return false;
+      }
+    }
+
+    return true;
+  });
+
+  return filtered.length;
 }
 
 /**

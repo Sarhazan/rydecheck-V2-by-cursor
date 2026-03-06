@@ -11,9 +11,63 @@ from flask import Blueprint
 
 api = Blueprint('compare', __name__)
 
+def _find_registered_on_other_supplier(comparison_result: Dict[str, Any], 
+                                       company_all: list) -> list:
+    """Find supplier trips that exist in company data but under a different supplier.
+
+    Logic:
+    - comparison_result['missing_in_company'] currently holds all supplier trips
+      that weren't matched against the *filtered* company trips for this supplier.
+    - Some of those trips may exist in company_all but with a different supplier name
+      (the "registered on other supplier" case we want to surface).
+    - We separate them out and return a structured list, while keeping truly-missing
+      trips in comparison_result['missing_in_company'].
+    """
+    # Build lookup of all company trips by trip_id
+    company_by_id = {}
+    for trip in company_all or []:
+        trip_id = str(trip.get('trip_id', '')).strip()
+        if trip_id:
+            company_by_id[trip_id] = trip
+
+    registered_elsewhere = []
+    still_missing = []
+
+    for supplier_trip in comparison_result.get('missing_in_company', []) or []:
+        trip_id = str(supplier_trip.get('trip_id', '')).strip()
+        if not trip_id:
+            still_missing.append(supplier_trip)
+            continue
+
+        company_trip = company_by_id.get(trip_id)
+        if company_trip:
+            # Trip exists in company but under a (possibly) different supplier
+            registered_elsewhere.append({
+                'trip_id': trip_id,
+                'date': company_trip.get('date') or supplier_trip.get('date', ''),
+                'time': company_trip.get('time') or supplier_trip.get('time', ''),
+                'source': company_trip.get('source') or supplier_trip.get('source', ''),
+                'destination': company_trip.get('destination') or supplier_trip.get('destination', ''),
+                'passengers': company_trip.get('passengers', []),
+                'supplier_price': supplier_trip.get('price', 0),
+                'company_price': company_trip.get('price', 0),
+                'registered_supplier': company_trip.get('supplier', ''),
+                'company_trip': company_trip,
+                'supplier_trip': supplier_trip,
+            })
+        else:
+            # Truly missing in company data
+            still_missing.append(supplier_trip)
+
+    # Update comparison_result in-place to keep only truly-missing trips there
+    comparison_result['missing_in_company'] = still_missing
+    return registered_elsewhere
+
+
 def _format_comparison_result(comparison_result: Dict[str, Any], 
                               company_filtered: list,
-                              supplier_key: str) -> Dict[str, Any]:
+                              supplier_key: str,
+                              registered_on_other_supplier: list | None = None) -> Dict[str, Any]:
     """Format comparison result to expected structure"""
     return {
         'company_trips': company_filtered,
@@ -28,6 +82,9 @@ def _format_comparison_result(comparison_result: Dict[str, Any],
         },
         'price_differences': {
             supplier_key: comparison_result['price_differences']
+        },
+        'registered_on_other_supplier': {
+            supplier_key: registered_on_other_supplier or []
         },
         'statistics': {
             supplier_key: {
@@ -79,9 +136,17 @@ def compare_files():
             
             # Simple comparison by ID only
             comparison_result = matcher.compare_by_id(company_filtered, suppliers_normalized['supplier1'])
+
+            # Find trips that exist in company but under a different supplier
+            registered_on_other = _find_registered_on_other_supplier(comparison_result, company_normalized)
             
             # Convert to the expected format
-            results = _format_comparison_result(comparison_result, company_normalized, 'supplier1')
+            results = _format_comparison_result(
+                comparison_result,
+                company_filtered,
+                'supplier1',
+                registered_on_other_supplier=registered_on_other
+            )
             
         elif files.get('supplier3') and not files.get('supplier1'):
             # Filter company trips to only those with supplier "חורי" for Hori comparison
@@ -92,9 +157,17 @@ def compare_files():
             
             # Simple comparison by ID only
             comparison_result = matcher.compare_by_id(company_filtered, suppliers_normalized['supplier3'])
+
+            # Find trips that exist in company but under a different supplier
+            registered_on_other = _find_registered_on_other_supplier(comparison_result, company_normalized)
             
             # Convert to the expected format
-            results = _format_comparison_result(comparison_result, company_normalized, 'supplier3')
+            results = _format_comparison_result(
+                comparison_result,
+                company_filtered,
+                'supplier3',
+                registered_on_other_supplier=registered_on_other
+            )
         else:
             # Use full matching for multiple suppliers
             results = matcher.match_all(company_normalized, suppliers_normalized)
