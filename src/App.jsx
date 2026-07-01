@@ -16,6 +16,7 @@ import { generateAllDemoData } from './utils/demoDataGenerator';
 import { logActivity, getAllActivities } from './utils/activityLogger';
 import { handleError } from './utils/errorHandler';
 import { canRunAnalysis } from './utils/analysisAvailability';
+import { validateParsedUpload } from './utils/uploadValidation';
 
 // Icons
 import { Loader2, FileText, BarChart3, Download, Trash2, Play, AlertCircle, List } from 'lucide-react';
@@ -81,11 +82,12 @@ function App() {
       return;
     }
 
-    setFiles(prev => ({ ...prev, [fileType]: file }));
     setError(null);
 
     try {
       const data = await parseFile(file, fileType);
+      validateParsedUpload(data, fileType);
+      setFiles(prev => ({ ...prev, [fileType]: file }));
       
       if (fileType === 'employees') {
         setParsedData(prev => {
@@ -105,6 +107,14 @@ function App() {
         });
       }
     } catch (err) {
+      setFiles(prev => ({ ...prev, [fileType]: null }));
+      if (fileType === 'employees') {
+        setParsedData(prev => ({ ...prev, employees: [], employeeMap: new Map() }));
+      } else if (fileType === 'ride') {
+        setParsedData(prev => ({ ...prev, rides: [] }));
+      } else {
+        setParsedData(prev => ({ ...prev, [fileType]: [] }));
+      }
       handleError(err, `טעינת קובץ ${fileType}`, setError, { fileType });
     }
   }, []);
