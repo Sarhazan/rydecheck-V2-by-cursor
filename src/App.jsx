@@ -15,6 +15,7 @@ import { calculateDepartmentBreakdown } from './utils/departmentCalculator';
 import { generateAllDemoData } from './utils/demoDataGenerator';
 import { logActivity, getAllActivities } from './utils/activityLogger';
 import { handleError } from './utils/errorHandler';
+import { canRunAnalysis } from './utils/analysisAvailability';
 
 // Icons
 import { Loader2, FileText, BarChart3, Download, Trash2, Play, AlertCircle, List } from 'lucide-react';
@@ -693,7 +694,12 @@ function App() {
       handleError(err, 'ייצוא דוח ניתוח', setError);
     }
   }, [matchResults, rideNotes]);
-
+  const analyzeButtonEnabled = canRunAnalysis({
+    isAnalyzing,
+    files,
+    parsedData,
+    manuallyAddedRides
+  });
 
   return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50 to-purple-50">
@@ -764,9 +770,9 @@ function App() {
             <motion.button
               onClick={runAnalysis}
               className="btn-modern bg-gradient-to-r from-green-600 to-green-700 text-white shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
-              disabled={isAnalyzing || parsedData.rides.length === 0}
-              whileHover={{ scale: parsedData.rides.length > 0 ? 1.05 : 1 }}
-              whileTap={{ scale: parsedData.rides.length > 0 ? 0.95 : 1 }}
+              disabled={!analyzeButtonEnabled}
+              whileHover={{ scale: analyzeButtonEnabled ? 1.05 : 1 }}
+              whileTap={{ scale: analyzeButtonEnabled ? 0.95 : 1 }}
             >
               {isAnalyzing ? (
                 <>
