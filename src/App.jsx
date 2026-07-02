@@ -17,6 +17,7 @@ import { logActivity, getAllActivities } from './utils/activityLogger';
 import { handleError } from './utils/errorHandler';
 import { canRunAnalysis } from './utils/analysisAvailability';
 import { validateParsedUpload } from './utils/uploadValidation';
+import { countLoadedRideTrips } from './utils/rideCounts';
 
 // Icons
 import { Loader2, FileText, BarChart3, Download, Trash2, Play, AlertCircle, List } from 'lucide-react';
@@ -704,6 +705,10 @@ function App() {
       handleError(err, 'ייצוא דוח ניתוח', setError);
     }
   }, [matchResults, rideNotes]);
+  const rideLoadedTripCount = useMemo(() => {
+    return countLoadedRideTrips(parsedData.rides);
+  }, [parsedData.rides]);
+
   const analyzeButtonEnabled = canRunAnalysis({
     isAnalyzing,
     files,
@@ -838,7 +843,7 @@ function App() {
               label="קובץ רייד (CSV)"
               onFileUpload={handleFileUpload}
               currentFile={files.ride}
-              itemCount={parsedData && parsedData.rides ? parsedData.rides.length : 0}
+              itemCount={rideLoadedTripCount}
             />
             <FileUpload
               fileType="bontour"
