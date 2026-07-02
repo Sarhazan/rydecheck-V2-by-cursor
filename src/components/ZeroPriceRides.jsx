@@ -8,6 +8,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 // Icons
 import { AlertTriangle, Edit2, Check, X, RefreshCw, Trash2, Download } from 'lucide-react';
 import { isRideWithoutPassengers } from '../utils/reviewCategories';
+import { formatRideDateTime } from '../utils/dateFormatter';
 
 /**
  * קומפוננטה להצגת נסיעות לבדיקה (מחיר אפס או נוסע 55555)
@@ -209,78 +210,6 @@ const ZeroPriceRides = memo(function ZeroPriceRides({
   if (zeroPriceRides.length === 0 && ridesWith55555.length === 0 && ridesWithoutPassengers.length === 0 && guestRides.length === 0 && exceptionalRides.length === 0 && delayedRides.length === 0) {
     return null;
   }
-
-  // פונקציה לפרסור תאריך
-  const parseDate = (dateStr) => {
-    if (!dateStr) return '-';
-    try {
-      const date = new Date(dateStr);
-      if (isNaN(date.getTime())) return dateStr;
-      return date.toLocaleDateString('he-IL', {
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit'
-      });
-    } catch {
-      return dateStr;
-    }
-  };
-
-  // פונקציה לפרסור תאריך ושעה
-  const parseDateAndTime = (dateStr, timeStr) => {
-    let datePart = dateStr || '';
-    let timePart = timeStr || '';
-    
-    // אם התאריך כולל זמן (מכיל : או space עם מספרים)
-    if (dateStr && (dateStr.includes(':') || dateStr.includes(' '))) {
-      const parts = dateStr.split(/[\sT]/);
-      if (parts.length > 1) {
-        datePart = parts[0];
-        timePart = parts[1] || '';
-      }
-    }
-    
-    if (!datePart) return '-';
-    
-    try {
-      // ניסיון לפרסר את התאריך
-      let date;
-      if (datePart.includes('/')) {
-        const [day, month, year] = datePart.split('/').map(Number);
-        if (timePart) {
-          const [hours, minutes] = timePart.split(':').map(Number);
-          date = new Date(year, month - 1, day, hours || 0, minutes || 0);
-        } else {
-          date = new Date(year, month - 1, day);
-        }
-      } else {
-        date = new Date(datePart + (timePart ? ' ' + timePart : ''));
-      }
-      
-      if (isNaN(date.getTime())) {
-        return datePart + (timePart ? ' ' + timePart : '');
-      }
-      
-      const dateFormatted = date.toLocaleDateString('he-IL', {
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit'
-      });
-      
-      if (timePart) {
-        const timeFormatted = date.toLocaleTimeString('he-IL', {
-          hour: '2-digit',
-          minute: '2-digit',
-          hour12: false
-        });
-        return `${dateFormatted} ${timeFormatted}`;
-      }
-      
-      return dateFormatted;
-    } catch {
-      return datePart + (timePart ? ' ' + timePart : '');
-    }
-  };
 
   // פונקציה לקבלת שמות עובדים
   const getEmployeeNames = (pids) => {
@@ -639,7 +568,7 @@ const ZeroPriceRides = memo(function ZeroPriceRides({
                   מספר נסיעה
                 </th>
                 <th className="px-6 py-4 text-right text-sm font-bold text-gray-800 border-b-2 border-yellow-300">
-                  {activeTab === 'noPassengers' ? 'תאריך ושעה' : 'תאריך'}
+                תאריך ושעה
                 </th>
                 {activeTab !== 'noPassengers' && (
                   <>
@@ -727,9 +656,7 @@ const ZeroPriceRides = memo(function ZeroPriceRides({
                         {ride.rideId || '-'}
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-700">
-                        {activeTab === 'noPassengers' 
-                          ? parseDateAndTime(ride.date, ride.time) 
-                          : parseDate(ride.date)}
+                        {formatRideDateTime(ride.date, ride.time)}
                       </td>
                       {activeTab !== 'noPassengers' && (
                         <>
