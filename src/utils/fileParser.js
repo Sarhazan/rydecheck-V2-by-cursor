@@ -47,6 +47,64 @@ export function extractPids(historyField) {
  * @param {Function} resolve - פונקציה לפתרון Promise
  * @param {Array} headers - מערך של כותרות העמודות (אופציונלי)
  */
+function isRidePassengerSummaryHeaders(headers = []) {
+  const normalizedHeaders = headers.map(header => String(header || '').trim());
+  const requiredHeaders = ['שם פרטי', 'שם משפחה', 'מספר נוסע', 'עלות', 'נסיעות'];
+  return requiredHeaders.every(required => normalizedHeaders.includes(required));
+}
+
+function parseNumberValue(value) {
+  if (value === null || value === undefined || value === '') return 0;
+  if (typeof value === 'number') return value;
+  const cleaned = String(value).replace(/[₪,%\s]/g, '').replace(/,/g, '').trim();
+  const parsed = parseFloat(cleaned);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function parseIntegerValue(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const cleaned = String(value).replace(/[^0-9]/g, '').trim();
+  if (!cleaned) return null;
+  const parsed = parseInt(cleaned, 10);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+function processRidePassengerSummaryData(data, resolve) {
+  const rides = data
+    .map((row, index) => {
+      const passengerId = parseIntegerValue(row['מספר נוסע']);
+      const price = parseNumberValue(row['עלות']);
+      const tripCount = parseIntegerValue(row['נסיעות']) || 0;
+      const firstName = String(row['שם פרטי'] || '').trim();
+      const lastName = String(row['שם משפחה'] || '').trim();
+      const fullName = `${firstName} ${lastName}`.trim();
+
+      if (!passengerId || (!price && !tripCount) || !fullName) {
+        return null;
+      }
+
+      return {
+        rideId: `SUMMARY_${passengerId}`,
+        date: '',
+        passengers: String(passengerId),
+        passengerCount: 1,
+        pids: [passengerId],
+        source: row['עיר'] || '',
+        destination: '',
+        price,
+        supplier: row['ספק'] || '',
+        notes: `דוח סיכום רייד - ${tripCount} נסיעות`,
+        tripCount,
+        isRideSummary: true,
+        rawData: row,
+        index
+      };
+    })
+    .filter(Boolean);
+
+  resolve(rides);
+}
+
 function processRidesData(data, resolve, headers = []) {
   const rides = data.map((row, index) => {
     // ניקוי מקפים מהכותרות - אם הכותרות מכילות מקפים, נסיר אותם
@@ -299,8 +357,12 @@ export function parseRideFile(data, filename) {
         dataRows.push(row);
       }
       
-      // 5. עיבוד הנתונים - מעבירים גם את הכותרות כדי שנוכל למצוא עמודות לפי אינדקס
-      processRidesData(dataRows, resolve, headers);
+      // 5. עיבוד הנתונים - תמיכה גם בדוח סיכום רייד לפי נוסע
+      if (isRidePassengerSummaryHeaders(headers)) {
+        processRidePassengerSummaryData(dataRows, resolve);
+      } else {
+        processRidesData(dataRows, resolve, headers);
+      }
     } catch (error) {
       reject(error);
     }
@@ -1130,9 +1192,35 @@ export function parseExcelFile(file, supplierType) {
  * @param {string} fileType - סוג הקובץ ('ride', 'employees', 'bontour', 'hori', 'gett')
  * @returns {Promise<Array|Object>} Promise שמחזיר את הנתונים המפורסים
  */
+async function readCsvText(file) {
+  const buffer = await file.arrayBuffer();
+  const utf8Text = new TextDecoder('utf-8').decode(buffer);
+
+  // חלק מהקבצים מרייד מיוצאים ב-Windows Hebrew. file.text() מפענח כ-UTF-8
+  // וגורם לכותרות עבריות להיות ג'יבריש, לכן נבצע fallback ל-windows-1255.
+  const hasReplacementChars = utf8Text.includes('�');
+  const hasHebrewHeaders = /שם פרטי|מספר נוסע|_ID|מחלקה/.test(utf8Text);
+
+  if (!hasReplacementChars && hasHebrewHeaders) {
+    return utf8Text;
+  }
+
+  try {
+    const windowsHebrewText = new TextDecoder('windows-1255').decode(buffer);
+    const windowsHebrewLooksValid = /שם פרטי|מספר נוסע|_ID|מחלקה/.test(windowsHebrewText);
+    if (windowsHebrewLooksValid) {
+      return windowsHebrewText;
+    }
+  } catch (error) {
+    // אם הדפדפן לא תומך בקידוד הזה, נחזור ל-UTF-8.
+  }
+
+  return utf8Text;
+}
+
 export async function parseFile(file, fileType) {
   if (file.name.endsWith('.csv')) {
-    const text = await file.text();
+    const text = await readCsvText(file);
     
     if (fileType === 'ride') {
       const result = await parseRideFile(text, file.name);
