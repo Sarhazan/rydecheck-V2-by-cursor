@@ -1052,6 +1052,48 @@ function findCandidateRides(gettDate, ridesByDate, dayRange = 1) {
  * @param {number} perfectMatchTimeDiff - הפרש זמן להתאמה מושלמת (בדקות)
  * @returns {Object|null} נסיעת רייד מותאמת או null
  */
+function normalizeMatchText(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[|*;,`"'()\[\]{}]/g, ' ')
+    .replace(/\d+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function countSharedWords(textA, textB) {
+  const wordsA = normalizeMatchText(textA).split(' ').filter(word => word.length > 1);
+  const wordsB = new Set(normalizeMatchText(textB).split(' ').filter(word => word.length > 1));
+  return wordsA.filter(word => wordsB.has(word)).length;
+}
+
+function getGettMatchQualityScore(gettRide, ride) {
+  let score = 0;
+
+  const passengerSharedWords = countSharedWords(gettRide.passengers, ride.passengers);
+  score += passengerSharedWords * 100;
+
+  const sourceSharedWords = countSharedWords(gettRide.source, ride.source);
+  score += sourceSharedWords * 20;
+
+  const destinationSharedWords = countSharedWords(gettRide.destination, ride.destination);
+  score += destinationSharedWords * 10;
+
+  const rideSupplier = String(ride.supplier || '').toLowerCase();
+  if (GETT_SUPPLIER_NAMES.some(name => rideSupplier.includes(String(name).toLowerCase()))) {
+    score += 50;
+  }
+
+  const priceDiff = Math.abs((ride.price || 0) - (gettRide.price || 0));
+  if (priceDiff <= 0.01) {
+    score += 30;
+  } else if (priceDiff <= 25) {
+    score += 10;
+  }
+
+  return score;
+}
+
 function findBestGettMatch(gettRide, candidateRides, matchedRideIds, parseDateTime, checkRideMatch, employeeMap, maxSearchTimeDiff = GETT_MAX_SEARCH_TIME_DIFF_MINUTES, perfectMatchTimeDiff = GETT_PERFECT_MATCH_TIME_DIFF_MINUTES) {
   const gettDate = parseDateTime(gettRide.date, gettRide.time || '');
   if (!gettDate) {
@@ -1063,6 +1105,7 @@ function findBestGettMatch(gettRide, candidateRides, matchedRideIds, parseDateTi
   
   let matchedRide = null;
   let bestTimeDiff = Infinity;
+  let bestMatchScore = -Infinity;
   let hasOrderNumberMatch = false; // האם יש התאמה לפי מספר הזמנה
   
   for (const ride of candidateRides) {
@@ -1126,9 +1169,11 @@ function findBestGettMatch(gettRide, candidateRides, matchedRideIds, parseDateTi
     
     // אם יש התאמה לפי מספר הזמנה, זו עדיפות גבוהה
     if (orderNumberMatch) {
-      if (!hasOrderNumberMatch || timeDiff < bestTimeDiff) {
+      const matchScore = getGettMatchQualityScore(gettRide, ride);
+      if (!hasOrderNumberMatch || matchScore > bestMatchScore || (matchScore === bestMatchScore && timeDiff < bestTimeDiff)) {
         matchedRide = ride;
         bestTimeDiff = timeDiff;
+        bestMatchScore = matchScore;
         hasOrderNumberMatch = true;
       }
       continue;
@@ -1140,16 +1185,18 @@ function findBestGettMatch(gettRide, candidateRides, matchedRideIds, parseDateTi
     }
     
     // אם הפרש הזמן גדול יותר מהטוב ביותר הנוכחי, נדלג על זו
-    // אבל אם יש התאמה עם אותו הפרש זמן, נבדוק גם את זו כדי לבחור את הטובה ביותר
-    if (timeDiff > bestTimeDiff) {
+    // אבל אם יש נסיעה עם ציון איכות טוב יותר, נעדיף אותה גם כשהזמן זהה/קרוב.
+    const matchScore = getGettMatchQualityScore(gettRide, ride);
+    if (timeDiff > bestTimeDiff && matchScore <= bestMatchScore) {
       continue;
     }
     
-    // עדכון ההתאמה הטובה ביותר אם הפרש הזמן קטן יותר או שווה
-    // אם יש שתי נסיעות עם אותו הפרש זמן, נבחר את הראשונה (הסדר ברשימה)
-    if (timeDiff <= bestTimeDiff) {
+    // עדכון ההתאמה הטובה ביותר לפי איכות התאמה, ואז לפי הפרש זמן.
+    // זה מונע שיוך לנסיעה סמוכה באותה שעה רק כי היא הופיעה מאוחר יותר ברשימה.
+    if (matchScore > bestMatchScore || (matchScore === bestMatchScore && timeDiff < bestTimeDiff)) {
       matchedRide = ride;
       bestTimeDiff = timeDiff;
+      bestMatchScore = matchScore;
     }
   }
   
