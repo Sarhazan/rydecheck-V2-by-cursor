@@ -939,6 +939,13 @@ function checkLocationMatch(gettRide, ride, normalizeGettLocation) {
  * @returns {boolean} true אם יש לפחות נוסע אחד משותף
  */
 function checkPassengerMatch(ride, gettRide, employeeMap, hasCommonPassenger) {
+  // קודם נבדוק התאמה ישירה לפי הטקסט שמופיע ברייד.
+  // בקבצי רייד מסוימים ה-PID הפנימי לא קיים במסד העובדים, אבל שם הנוסע עדיין מופיע בשדה passengers.
+  const directPassengerSharedWords = countSharedWords(gettRide.passengers, ride.passengers);
+  if (directPassengerSharedWords >= 2) {
+    return true;
+  }
+
   const hasCommon = hasCommonPassenger(ride.pids, gettRide.passengers, employeeMap);
   // אם אין נוסעים משותפים ויש נוסעים ברייד, אין התאמה
   if (!hasCommon && ride.pids.length > 0) {
@@ -982,8 +989,13 @@ function checkRideMatch(gettRide, ride, parseDateTime, hasCommonPassenger, norma
     return false;
   }
   
-  // 4. בדיקת זמן - הפרש זמן ≤ 10 דקות
-  const timeMatch = checkTimeMatch(gettDate, rideDateObj, 10);
+  // 4. בדיקת זמן - בדרך כלל הפרש זמן ≤ 10 דקות.
+  // בנסיעות לנתב"ג גט עשוי להציג את שעת ההגעה, בעוד רייד מציג את שעת האיסוף.
+  // לכן עבור נסיעות שדה תעופה שכבר עברו מיקום+נוסע נאפשר את טווח החיפוש הרחב יותר.
+  const combinedDestination = `${gettRide.destination || ''} ${ride.destination || ''}`;
+  const isAirportRide = /נתב["'׳]?ג|טרמינל|שדה\s*תעופה\s*בן\s*גוריון/.test(combinedDestination);
+  const allowedTimeDiff = isAirportRide ? GETT_MAX_SEARCH_TIME_DIFF_MINUTES : 10;
+  const timeMatch = checkTimeMatch(gettDate, rideDateObj, allowedTimeDiff);
   if (!timeMatch) {
     return false;
   }
