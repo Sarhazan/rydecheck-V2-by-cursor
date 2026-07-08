@@ -17,6 +17,7 @@ import { logActivity, getAllActivities } from './utils/activityLogger';
 import { handleError } from './utils/errorHandler';
 import { canRunAnalysis } from './utils/analysisAvailability';
 import { validateParsedUpload } from './utils/uploadValidation';
+import { validateEmployeeCoverage } from './utils/employeeCoverage';
 import { countLoadedRideTrips } from './utils/rideCounts';
 
 // Icons
@@ -566,6 +567,8 @@ function App() {
     try {
       setIsAnalyzing(true);
       setError(null);
+
+      validateEmployeeCoverage(allRides, parsedData.employeeMap);
 
       const suppliersData = {
         bontour: parsedData.bontour,
