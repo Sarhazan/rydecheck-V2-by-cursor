@@ -13,7 +13,10 @@ test('gett regression: exact Gett order id with shared passenger matches even wh
     destination: 'אברהם דוד ליכטמן 3 , ירושלים',
     price: 314.89,
     supplier: 'gett',
-    supplierOrderNumber: '104146155'
+    supplierOrderNumber: '104146155',
+    rawData: {
+      אזורים: 'נתבג;מודיעין;ירושלים ;'
+    }
   };
 
   const gettRide = {

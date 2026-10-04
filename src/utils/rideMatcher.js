@@ -919,15 +919,45 @@ function checkTimeMatch(gettDate, rideDate, maxDiffMinutes = GETT_TIME_TOLERANCE
  * @returns {boolean} true אם מקור ויעד תואמים
  */
 function checkLocationMatch(gettRide, ride, normalizeGettLocation) {
-  const gettSourceNorm = normalizeGettLocation(gettRide.source);
-  const gettDestNorm = normalizeGettLocation(gettRide.destination);
-  const rideSourceNorm = normalizeGettLocation(ride.source);
-  const rideDestNorm = normalizeGettLocation(ride.destination);
-  
-  const sourceMatch = locationsMatch(gettSourceNorm, rideSourceNorm);
-  const destMatch = locationsMatch(gettDestNorm, rideDestNorm);
-  
-  return sourceMatch && destMatch;
+  return checkRealAddressMatch(gettRide, ride, normalizeGettLocation);
+}
+
+function isAirportLikeLocation(location) {
+  return /נתב["'׳]?ג|טרמינל|שדה\s*תעופה\s*בן\s*גוריון|airport|termin/i.test(String(location || ''));
+}
+
+function getGettRealLocationCandidates(gettRide) {
+  return [gettRide.source, gettRide.destination]
+    .map(location => String(location || '').trim())
+    .filter(location => location && !isAirportLikeLocation(location));
+}
+
+function getRideRealLocationCandidates(ride) {
+  const areas = String(ride?.rawData?.אזורים || '')
+    .split(/[;,]/)
+    .map(area => area.trim())
+    .filter(Boolean);
+
+  return [ride.source, ride.destination, ...areas]
+    .map(location => String(location || '').replace(/[|]/g, '').trim())
+    .filter(location => location && !isAirportLikeLocation(location));
+}
+
+function checkRealAddressMatch(gettRide, ride, normalizeGettLocation) {
+  const gettCandidates = getGettRealLocationCandidates(gettRide);
+  const rideCandidates = getRideRealLocationCandidates(ride);
+
+  if (gettCandidates.length === 0 || rideCandidates.length === 0) {
+    return false;
+  }
+
+  return gettCandidates.some(gettLocation => {
+    const gettNorm = normalizeGettLocation(gettLocation);
+    return rideCandidates.some(rideLocation => {
+      const rideNorm = normalizeGettLocation(rideLocation);
+      return locationsMatch(gettNorm, rideNorm);
+    });
+  });
 }
 
 /**
@@ -1003,7 +1033,7 @@ function checkRideMatch(gettRide, ride, parseDateTime, hasCommonPassenger, norma
   return true;
 }
 
-function checkExactGettOrderMatch(gettRide, ride, parseDateTime, hasCommonPassenger, employeeMap) {
+function checkExactGettOrderMatch(gettRide, ride, parseDateTime, hasCommonPassenger, normalizeGettLocation, employeeMap) {
   const gettDate = parseGettDateTime(gettRide, parseDateTime);
   const rideDateObj = parseRideDateTime(ride, parseDateTime);
   if (!gettDate || !rideDateObj) {
@@ -1012,6 +1042,10 @@ function checkExactGettOrderMatch(gettRide, ride, parseDateTime, hasCommonPassen
 
   const timeDiff = Math.abs(rideDateObj.getTime() - gettDate.getTime()) / (1000 * 60);
   if (timeDiff > GETT_MAX_SEARCH_TIME_DIFF_MINUTES) {
+    return false;
+  }
+
+  if (!checkRealAddressMatch(gettRide, ride, normalizeGettLocation)) {
     return false;
   }
 
@@ -1156,7 +1190,7 @@ function findBestGettMatch(gettRide, candidateRides, matchedRideIds, parseDateTi
     // במקרה כזה מספיקים מספר הזמנה + זמן קרוב + נוסע משותף; בנסיעות משותפות/נתב"ג
     // Gett יכול להציג תחנת ביניים/טרמינל אחר ולכן לא מחייבים מקור+יעד זהים.
     if (orderNumberMatch && !hasOrderNumberMatch) {
-      const matchResult = checkExactGettOrderMatch(gettRide, ride, parseDateTime, hasCommonPassenger, employeeMap);
+      const matchResult = checkExactGettOrderMatch(gettRide, ride, parseDateTime, hasCommonPassenger, normalizeGettLocation, employeeMap);
       if (matchResult) {
         // אם כל הקריטריונים מתקיימים, זו התאמה מושלמת
         matchedRide = ride;
@@ -1384,7 +1418,7 @@ export function matchGettToRides(gettData, rides, employeeMap = null) {
         }
         
         // בדיקת התאמה - אם יש מספר הזמנה, נבדוק זמן קרוב ונוסע משותף בלי לחייב מקור+יעד
-        const matchResult = checkExactGettOrderMatch(gettRide, ride, parseDateTime, hasCommonPassenger, employeeMap);
+        const matchResult = checkExactGettOrderMatch(gettRide, ride, parseDateTime, hasCommonPassenger, normalizeGettLocation, employeeMap);
         if (matchResult) {
           matchedRide = ride;
           break; // מצאנו התאמה לפי מספר הזמנה
