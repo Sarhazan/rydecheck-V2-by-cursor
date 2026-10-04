@@ -926,21 +926,32 @@ function isAirportLikeLocation(location) {
   return /נתב["'׳]?ג|טרמינל|שדה\s*תעופה\s*בן\s*גוריון|airport|termin/i.test(String(location || ''));
 }
 
-function getGettRealLocationCandidates(gettRide) {
-  return [gettRide.source, gettRide.destination]
-    .map(location => String(location || '').trim())
+function getDirectionalRealLocationCandidates(source, destination) {
+  const sourceText = String(source || '').replace(/[|]/g, '').trim();
+  const destinationText = String(destination || '').replace(/[|]/g, '').trim();
+  const sourceIsAirport = isAirportLikeLocation(sourceText);
+  const destinationIsAirport = isAirportLikeLocation(destinationText);
+
+  // יציאה מנתב"ג: הכתובת החשובה היא היעד האחרון, לא הטרמינל.
+  if (sourceIsAirport && destinationText && !destinationIsAirport) {
+    return [destinationText];
+  }
+
+  // נסיעה אל נתב"ג: הכתובת החשובה היא כתובת האיסוף הראשונה, לא הטרמינל.
+  if (destinationIsAirport && sourceText && !sourceIsAirport) {
+    return [sourceText];
+  }
+
+  return [sourceText, destinationText]
     .filter(location => location && !isAirportLikeLocation(location));
 }
 
-function getRideRealLocationCandidates(ride) {
-  const areas = String(ride?.rawData?.אזורים || '')
-    .split(/[;,]/)
-    .map(area => area.trim())
-    .filter(Boolean);
+function getGettRealLocationCandidates(gettRide) {
+  return getDirectionalRealLocationCandidates(gettRide.source, gettRide.destination);
+}
 
-  return [ride.source, ride.destination, ...areas]
-    .map(location => String(location || '').replace(/[|]/g, '').trim())
-    .filter(location => location && !isAirportLikeLocation(location));
+function getRideRealLocationCandidates(ride) {
+  return getDirectionalRealLocationCandidates(ride.source, ride.destination);
 }
 
 function checkRealAddressMatch(gettRide, ride, normalizeGettLocation) {

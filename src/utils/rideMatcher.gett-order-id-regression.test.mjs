@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { matchGettToRides } from './rideMatcher.js';
 
-test('gett regression: exact Gett order id with shared passenger matches even when shared-trip stops differ', () => {
+test('gett regression: exact Gett order id still requires the directional real address to match', () => {
   const ride = {
     rideId: 362915,
     date: '03/09/2026 00:15:00',
@@ -37,7 +37,6 @@ test('gett regression: exact Gett order id with shared passenger matches even wh
   const matches = matchGettToRides([gettRide], [ride], employeeMap);
   const match = matches.find(result => result.supplierData?.orderNumber === '104146155');
 
-  assert.equal(match?.status, 'matched');
-  assert.equal(match?.ride?.rideId, 362915);
-  assert.equal(match?.priceDifference, Math.abs(314.89 - 379.81));
+  assert.equal(match?.status, 'missing_in_ride');
+  assert.equal(match?.ride, null);
 });
