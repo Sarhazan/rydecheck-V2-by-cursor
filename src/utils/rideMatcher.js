@@ -1003,6 +1003,21 @@ function checkRideMatch(gettRide, ride, parseDateTime, hasCommonPassenger, norma
   return true;
 }
 
+function checkExactGettOrderMatch(gettRide, ride, parseDateTime, hasCommonPassenger, employeeMap) {
+  const gettDate = parseGettDateTime(gettRide, parseDateTime);
+  const rideDateObj = parseRideDateTime(ride, parseDateTime);
+  if (!gettDate || !rideDateObj) {
+    return false;
+  }
+
+  const timeDiff = Math.abs(rideDateObj.getTime() - gettDate.getTime()) / (1000 * 60);
+  if (timeDiff > GETT_MAX_SEARCH_TIME_DIFF_MINUTES) {
+    return false;
+  }
+
+  return checkPassengerMatch(ride, gettRide, employeeMap, hasCommonPassenger);
+}
+
 /**
  * יצירת מפת נסיעות לפי תאריך (רק יום, ללא שעה) לייעול החיפוש
  * @param {Array} rides - מערך של נסיעות רייד
@@ -1137,11 +1152,11 @@ function findBestGettMatch(gettRide, candidateRides, matchedRideIds, parseDateTi
     const orderNumberMatch = gettOrderNumber && rideOrderNumber && 
                              String(gettOrderNumber).trim() === String(rideOrderNumber).trim();
     
-    // אם יש התאמה לפי מספר הזמנה, זה עדיפות גבוהה מאוד
-    // אבל עדיין צריך לבדוק את שאר הקריטריונים (מיקום, נוסעים, זמן)
+    // אם יש התאמה לפי מספר הזמנה, זה עדיפות גבוהה מאוד.
+    // במקרה כזה מספיקים מספר הזמנה + זמן קרוב + נוסע משותף; בנסיעות משותפות/נתב"ג
+    // Gett יכול להציג תחנת ביניים/טרמינל אחר ולכן לא מחייבים מקור+יעד זהים.
     if (orderNumberMatch && !hasOrderNumberMatch) {
-      // אם יש התאמה לפי מספר הזמנה, נבדוק את שאר הקריטריונים
-      const matchResult = checkRideMatch(gettRide, ride, parseDateTime, hasCommonPassenger, normalizeGettLocation, employeeMap);
+      const matchResult = checkExactGettOrderMatch(gettRide, ride, parseDateTime, hasCommonPassenger, employeeMap);
       if (matchResult) {
         // אם כל הקריטריונים מתקיימים, זו התאמה מושלמת
         matchedRide = ride;
@@ -1368,8 +1383,8 @@ export function matchGettToRides(gettData, rides, employeeMap = null) {
           }
         }
         
-        // בדיקת התאמה - אם יש מספר הזמנה, נבדוק את שאר הקריטריונים
-        const matchResult = checkRideMatch(gettRide, ride, parseDateTime, hasCommonPassenger, normalizeGettLocation, employeeMap);
+        // בדיקת התאמה - אם יש מספר הזמנה, נבדוק זמן קרוב ונוסע משותף בלי לחייב מקור+יעד
+        const matchResult = checkExactGettOrderMatch(gettRide, ride, parseDateTime, hasCommonPassenger, employeeMap);
         if (matchResult) {
           matchedRide = ride;
           break; // מצאנו התאמה לפי מספר הזמנה
