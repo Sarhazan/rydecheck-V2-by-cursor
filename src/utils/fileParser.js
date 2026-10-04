@@ -41,6 +41,14 @@ export function extractPids(historyField) {
     .filter(pid => !isNaN(pid));
 }
 
+function extractGettOrderId(historyField) {
+  if (!historyField) return null;
+  const orderMatch = String(historyField).match(/\|gettorderid=([^|]+)\|/i);
+  if (!orderMatch) return null;
+  const orderId = orderMatch[1].trim();
+  return orderId || null;
+}
+
 /**
  * עיבוד נתוני נסיעות לאחר פרסינג
  * @param {Array} data - מערך של שורות מהקובץ
@@ -162,6 +170,7 @@ function processRidesData(data, resolve, headers = []) {
       }
     }
     const price = parseFloat(priceRaw);
+    const supplierOrderNumber = extractGettOrderId(cleanRow.היסטוריה || '');
     
     // חילוץ rideId - ננסה כמה אפשרויות
     let rideId = null;
@@ -237,6 +246,7 @@ function processRidesData(data, resolve, headers = []) {
       destination: cleanRow.יעד || '',
       price: isNaN(price) ? 0 : price,
       supplier: cleanRow.ספק || '',
+      supplierOrderNumber,
       notes: notes, // הוספת שדה הערות
       rawData: cleanRow
     };
@@ -709,10 +719,11 @@ function extractGettPassengers(row, findColumn) {
 function parseGettRow(row, index, autoPriceColumnKey, findColumn) {
   // חילוץ מספר הזמנה
   const orderNumber = extractGettOrderNumber(row);
+  const status = row.__EMPTY_3 !== undefined ? String(row.__EMPTY_3 || '').trim() : '';
   
   // חילוץ תאריך ושעה
   const { date: dateStr, time: timeStr } = extractGettDateTime(row, findColumn);
-  
+
   // חילוץ מקור ויעד
   const { source: sourceStr, destination: destStr } = extractGettLocations(row, findColumn);
   
@@ -744,6 +755,7 @@ function parseGettRow(row, index, autoPriceColumnKey, findColumn) {
     passengers: passengersStr,
     price: price,
     orderNumber: orderNumber,
+    status,
     rawData: row,
     index: index
   };

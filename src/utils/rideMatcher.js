@@ -1079,6 +1079,11 @@ function countSharedWords(textA, textB) {
   return wordsA.filter(word => wordsB.has(word)).length;
 }
 
+function isCancelledGettRide(gettRide) {
+  const statusText = `${gettRide?.status || ''} ${gettRide?.rawData?.__EMPTY_3 || ''}`.trim();
+  return /בוטל|בוטלה|cancel/i.test(statusText);
+}
+
 function getGettMatchQualityScore(gettRide, ride) {
   let score = 0;
 
@@ -1315,6 +1320,11 @@ export function matchGettToRides(gettData, rides, employeeMap = null) {
   
   // עבור כל נסיעת גט
   for (const gettRide of sortedGettData) {
+    if (isCancelledGettRide(gettRide)) {
+      matches.push(createGettMatchResult(gettRide, null, 'missing_in_ride'));
+      continue;
+    }
+
     const gettOrderNumber = gettRide.orderNumber || gettRide.orderId;
     const gettOrderNumberStr = gettOrderNumber ? String(gettOrderNumber).trim() : null;
     
