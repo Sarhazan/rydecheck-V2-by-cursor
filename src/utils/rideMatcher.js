@@ -919,15 +919,56 @@ function checkTimeMatch(gettDate, rideDate, maxDiffMinutes = GETT_TIME_TOLERANCE
  * @returns {boolean} true אם מקור ויעד תואמים
  */
 function checkLocationMatch(gettRide, ride, normalizeGettLocation) {
-  const gettSourceNorm = normalizeGettLocation(gettRide.source);
-  const gettDestNorm = normalizeGettLocation(gettRide.destination);
-  const rideSourceNorm = normalizeGettLocation(ride.source);
-  const rideDestNorm = normalizeGettLocation(ride.destination);
-  
-  const sourceMatch = locationsMatch(gettSourceNorm, rideSourceNorm);
-  const destMatch = locationsMatch(gettDestNorm, rideDestNorm);
-  
-  return sourceMatch && destMatch;
+  return checkRealAddressMatch(gettRide, ride, normalizeGettLocation);
+}
+
+function isAirportLikeLocation(location) {
+  return /נתב["'׳]?ג|טרמינל|שדה\s*תעופה\s*בן\s*גוריון|airport|termin/i.test(String(location || ''));
+}
+
+function getDirectionalRealLocationCandidates(source, destination) {
+  const sourceText = String(source || '').replace(/[|]/g, '').trim();
+  const destinationText = String(destination || '').replace(/[|]/g, '').trim();
+  const sourceIsAirport = isAirportLikeLocation(sourceText);
+  const destinationIsAirport = isAirportLikeLocation(destinationText);
+
+  // יציאה מנתב"ג: הכתובת החשובה היא היעד האחרון, לא הטרמינל.
+  if (sourceIsAirport && destinationText && !destinationIsAirport) {
+    return [destinationText];
+  }
+
+  // נסיעה אל נתב"ג: הכתובת החשובה היא כתובת האיסוף הראשונה, לא הטרמינל.
+  if (destinationIsAirport && sourceText && !sourceIsAirport) {
+    return [sourceText];
+  }
+
+  return [sourceText, destinationText]
+    .filter(location => location && !isAirportLikeLocation(location));
+}
+
+function getGettRealLocationCandidates(gettRide) {
+  return getDirectionalRealLocationCandidates(gettRide.source, gettRide.destination);
+}
+
+function getRideRealLocationCandidates(ride) {
+  return getDirectionalRealLocationCandidates(ride.source, ride.destination);
+}
+
+function checkRealAddressMatch(gettRide, ride, normalizeGettLocation) {
+  const gettCandidates = getGettRealLocationCandidates(gettRide);
+  const rideCandidates = getRideRealLocationCandidates(ride);
+
+  if (gettCandidates.length === 0 || rideCandidates.length === 0) {
+    return false;
+  }
+
+  return gettCandidates.some(gettLocation => {
+    const gettNorm = normalizeGettLocation(gettLocation);
+    return rideCandidates.some(rideLocation => {
+      const rideNorm = normalizeGettLocation(rideLocation);
+      return locationsMatch(gettNorm, rideNorm);
+    });
+  });
 }
 
 /**
@@ -1001,6 +1042,25 @@ function checkRideMatch(gettRide, ride, parseDateTime, hasCommonPassenger, norma
   }
   
   return true;
+}
+
+function checkExactGettOrderMatch(gettRide, ride, parseDateTime, hasCommonPassenger, normalizeGettLocation, employeeMap) {
+  const gettDate = parseGettDateTime(gettRide, parseDateTime);
+  const rideDateObj = parseRideDateTime(ride, parseDateTime);
+  if (!gettDate || !rideDateObj) {
+    return false;
+  }
+
+  const timeDiff = Math.abs(rideDateObj.getTime() - gettDate.getTime()) / (1000 * 60);
+  if (timeDiff > GETT_MAX_SEARCH_TIME_DIFF_MINUTES) {
+    return false;
+  }
+
+  if (!checkRealAddressMatch(gettRide, ride, normalizeGettLocation)) {
+    return false;
+  }
+
+  return checkPassengerMatch(ride, gettRide, employeeMap, hasCommonPassenger);
 }
 
 /**
@@ -1079,6 +1139,11 @@ function countSharedWords(textA, textB) {
   return wordsA.filter(word => wordsB.has(word)).length;
 }
 
+function isCancelledGettRide(gettRide) {
+  const statusText = `${gettRide?.status || ''} ${gettRide?.rawData?.__EMPTY_3 || ''}`.trim();
+  return /בוטל|בוטלה|cancel/i.test(statusText);
+}
+
 function getGettMatchQualityScore(gettRide, ride) {
   let score = 0;
 
@@ -1132,11 +1197,11 @@ function findBestGettMatch(gettRide, candidateRides, matchedRideIds, parseDateTi
     const orderNumberMatch = gettOrderNumber && rideOrderNumber && 
                              String(gettOrderNumber).trim() === String(rideOrderNumber).trim();
     
-    // אם יש התאמה לפי מספר הזמנה, זה עדיפות גבוהה מאוד
-    // אבל עדיין צריך לבדוק את שאר הקריטריונים (מיקום, נוסעים, זמן)
+    // אם יש התאמה לפי מספר הזמנה, זה עדיפות גבוהה מאוד.
+    // במקרה כזה מספיקים מספר הזמנה + זמן קרוב + נוסע משותף; בנסיעות משותפות/נתב"ג
+    // Gett יכול להציג תחנת ביניים/טרמינל אחר ולכן לא מחייבים מקור+יעד זהים.
     if (orderNumberMatch && !hasOrderNumberMatch) {
-      // אם יש התאמה לפי מספר הזמנה, נבדוק את שאר הקריטריונים
-      const matchResult = checkRideMatch(gettRide, ride, parseDateTime, hasCommonPassenger, normalizeGettLocation, employeeMap);
+      const matchResult = checkExactGettOrderMatch(gettRide, ride, parseDateTime, hasCommonPassenger, normalizeGettLocation, employeeMap);
       if (matchResult) {
         // אם כל הקריטריונים מתקיימים, זו התאמה מושלמת
         matchedRide = ride;
@@ -1315,6 +1380,11 @@ export function matchGettToRides(gettData, rides, employeeMap = null) {
   
   // עבור כל נסיעת גט
   for (const gettRide of sortedGettData) {
+    if (isCancelledGettRide(gettRide)) {
+      matches.push(createGettMatchResult(gettRide, null, 'missing_in_ride'));
+      continue;
+    }
+
     const gettOrderNumber = gettRide.orderNumber || gettRide.orderId;
     const gettOrderNumberStr = gettOrderNumber ? String(gettOrderNumber).trim() : null;
     
@@ -1358,8 +1428,8 @@ export function matchGettToRides(gettData, rides, employeeMap = null) {
           }
         }
         
-        // בדיקת התאמה - אם יש מספר הזמנה, נבדוק את שאר הקריטריונים
-        const matchResult = checkRideMatch(gettRide, ride, parseDateTime, hasCommonPassenger, normalizeGettLocation, employeeMap);
+        // בדיקת התאמה - אם יש מספר הזמנה, נבדוק זמן קרוב ונוסע משותף בלי לחייב מקור+יעד
+        const matchResult = checkExactGettOrderMatch(gettRide, ride, parseDateTime, hasCommonPassenger, normalizeGettLocation, employeeMap);
         if (matchResult) {
           matchedRide = ride;
           break; // מצאנו התאמה לפי מספר הזמנה
