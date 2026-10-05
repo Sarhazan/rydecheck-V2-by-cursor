@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
+import { getExceptionalPassengerLabels } from './exceptionalRides';
 
 /**
  * ייצוא דוח Excel למחלקה
@@ -216,6 +217,23 @@ export function exportExceptionalRides(exceptionalRides) {
   const employeesMap = new Map();
   
   exceptionalRides.forEach(ride => {
+    const exceptionalPassengers = Array.isArray(ride.exceptionalPassengers) && ride.exceptionalPassengers.length > 0
+      ? ride.exceptionalPassengers
+      : null;
+
+    if (exceptionalPassengers) {
+      exceptionalPassengers.forEach(passenger => {
+        const employeeName = passenger.label || passenger.name;
+        if (!employeeName) return;
+
+        if (!employeesMap.has(employeeName)) {
+          employeesMap.set(employeeName, []);
+        }
+        employeesMap.get(employeeName).push({ ride, passenger });
+      });
+      return;
+    }
+
     const passengersStr = ride.passengers || '';
     const employeeName = extractExceptionalEmployeeName(passengersStr);
     
@@ -223,14 +241,14 @@ export function exportExceptionalRides(exceptionalRides) {
       if (!employeesMap.has(employeeName)) {
         employeesMap.set(employeeName, []);
       }
-      employeesMap.get(employeeName).push(ride);
+      employeesMap.get(employeeName).push({ ride, passenger: null });
     }
   });
   
   // יצירת מערך נתונים ל-Excel
   const excelData = [];
   
-  employeesMap.forEach((rides, employeeName) => {
+  employeesMap.forEach((rideEntries, employeeName) => {
     // הוספת שורת כותרת עם שם העובד
     excelData.push({
       'שם העובד': employeeName,
@@ -239,6 +257,7 @@ export function exportExceptionalRides(exceptionalRides) {
       'מוצא': '',
       'יעד': '',
       'נוסעים': '',
+      'מחלקה': '',
       'ספק': ''
     });
     
@@ -250,18 +269,20 @@ export function exportExceptionalRides(exceptionalRides) {
       'מוצא': 'מוצא',
       'יעד': 'יעד',
       'נוסעים': 'נוסעים',
+      'מחלקה': 'מחלקה',
       'ספק': 'ספק'
     });
     
     // הוספת כל הנסיעות של העובד
-    rides.forEach(ride => {
+    rideEntries.forEach(({ ride, passenger }) => {
       excelData.push({
         'שם העובד': '',
         'מספר נסיעה': ride.rideId || '',
         'תאריך': ride.date || '',
         'מוצא': ride.source || '',
         'יעד': ride.destination || '',
-        'נוסעים': ride.passengers || '',
+        'נוסעים': passenger?.label || getExceptionalPassengerLabels(ride) || ride.passengers || '',
+        'מחלקה': passenger?.department || '',
         'ספק': ride.supplier || ''
       });
     });
@@ -274,6 +295,7 @@ export function exportExceptionalRides(exceptionalRides) {
       'מוצא': '',
       'יעד': '',
       'נוסעים': '',
+      'מחלקה': '',
       'ספק': ''
     });
   });
@@ -291,6 +313,7 @@ export function exportExceptionalRides(exceptionalRides) {
     { wch: 30 }, // מוצא
     { wch: 30 }, // יעד
     { wch: 40 }, // נוסעים
+    { wch: 25 }, // מחלקה
     { wch: 20 }  // ספק
   ];
   ws['!cols'] = colWidths;

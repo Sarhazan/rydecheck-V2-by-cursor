@@ -1144,6 +1144,19 @@ function isCancelledGettRide(gettRide) {
   return /בוטל|בוטלה|cancel/i.test(statusText);
 }
 
+function hasNonZeroGettCharge(gettRide) {
+  const numericPrice = Number(gettRide?.price || 0);
+  return Number.isFinite(numericPrice) && Math.abs(numericPrice) > 0.01;
+}
+
+function shouldBlockCancelledGettRide(gettRide) {
+  return isCancelledGettRide(gettRide) && !hasNonZeroGettCharge(gettRide);
+}
+
+function isBillableCancelledGettRide(gettRide) {
+  return isCancelledGettRide(gettRide) && hasNonZeroGettCharge(gettRide);
+}
+
 function getGettMatchQualityScore(gettRide, ride) {
   let score = 0;
 
@@ -1380,7 +1393,7 @@ export function matchGettToRides(gettData, rides, employeeMap = null) {
   
   // עבור כל נסיעת גט
   for (const gettRide of sortedGettData) {
-    if (isCancelledGettRide(gettRide)) {
+    if (shouldBlockCancelledGettRide(gettRide)) {
       matches.push(createGettMatchResult(gettRide, null, 'missing_in_ride'));
       continue;
     }
@@ -1437,8 +1450,10 @@ export function matchGettToRides(gettData, rides, employeeMap = null) {
       }
     }
     
-    // אם לא מצאנו התאמה לפי מספר הזמנה, נחפש התאמה רגילה
-    if (!matchedRide) {
+    // אם לא מצאנו התאמה לפי מספר הזמנה, נחפש התאמה רגילה.
+    // חריג: נסיעת Gett מבוטלת עם חיוב לא אפס יכולה להשתדך רק לפי gettorderid מדויק,
+    // כדי שלא "תחטוף" נסיעת Ride שיש לה הזמנת Gett תקינה אחרת.
+    if (!matchedRide && !isBillableCancelledGettRide(gettRide)) {
       // מציאת נסיעות מועמדות
       const candidateRides = findCandidateRides(gettDate, ridesByDate, GETT_DATE_SEARCH_RANGE_DAYS);
       

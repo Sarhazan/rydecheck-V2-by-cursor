@@ -9,6 +9,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { AlertTriangle, Edit2, Check, X, RefreshCw, Trash2, Download } from 'lucide-react';
 import { isRideWithoutPassengers } from '../utils/reviewCategories';
 import { formatRideDateTime } from '../utils/dateFormatter';
+import { buildExceptionalRides, countExceptionalPassengers, getExceptionalPassengerLabels } from '../utils/exceptionalRides';
 
 /**
  * קומפוננטה להצגת נסיעות לבדיקה (מחיר אפס או נוסע 55555)
@@ -133,26 +134,15 @@ const ZeroPriceRides = memo(function ZeroPriceRides({
     });
   }, [rides, tripsRemovedFromReview, guestRidesRemoved]);
 
-  // סינון נסיעות חריג (נסיעות שבהן יש את המילה "חריג" בשדה נוסעים)
+  // סינון נסיעות חריג (כולל עובדים חריגים שנוצרו/עודכנו דרך שיוך מחלקתי ידני)
   const exceptionalRides = useMemo(() => {
-    return rides.filter(ride => {
-      // בדיקה אם הנסיעה הוסרה מהרייד
-      const isRemoved = ride.rideId && tripsRemovedFromReview && typeof tripsRemovedFromReview.has === 'function' && tripsRemovedFromReview.has(ride.rideId);
-      if (isRemoved) {
-        return false;
-      }
-      
-      // בדיקה בשדה נוסעים (מחרוזת) - חיפוש המילה "חריג"
-      if (ride.passengers) {
-        const passengersStr = String(ride.passengers);
-        // חיפוש המילה "חריג" במחרוזת
-        if (passengersStr.includes('חריג')) {
-          return true;
-        }
-      }
-      return false;
-    });
-  }, [rides, tripsRemovedFromReview]);
+    return buildExceptionalRides(rides, employeeMap, tripsRemovedFromReview);
+  }, [rides, employeeMap, tripsRemovedFromReview]);
+
+  const exceptionalRideCount = exceptionalRides.length;
+  const exceptionalPassengerCount = useMemo(() => {
+    return countExceptionalPassengers(exceptionalRides);
+  }, [exceptionalRides]);
 
   // סינון נסיעות איחורים (נסיעות שבהן יש את המילה "איחור" בשדה הערות)
   const delayedRides = useMemo(() => {
@@ -266,10 +256,10 @@ const ZeroPriceRides = memo(function ZeroPriceRides({
     if (activeTab === 'passenger55555') return ridesWith55555.length;
     if (activeTab === 'noPassengers') return ridesWithoutPassengers.length;
     if (activeTab === 'guest') return guestRides.length;
-    if (activeTab === 'exceptional') return exceptionalRides.length;
+    if (activeTab === 'exceptional') return exceptionalRideCount;
     if (activeTab === 'delayed') return filteredDelayedRides.length;
     return 0;
-  }, [activeTab, filteredZeroPriceRides.length, ridesWith55555.length, ridesWithoutPassengers.length, guestRides.length, exceptionalRides.length, filteredDelayedRides.length]);
+  }, [activeTab, filteredZeroPriceRides.length, ridesWith55555.length, ridesWithoutPassengers.length, guestRides.length, exceptionalRideCount, filteredDelayedRides.length]);
 
   // פונקציה לקבלת מחיר מעודכן או מקורי
   const getPrice = (ride) => {
@@ -397,7 +387,7 @@ const ZeroPriceRides = memo(function ZeroPriceRides({
                   : 'bg-yellow-200/50 text-yellow-800 hover:bg-yellow-300/50'
               }`}
             >
-              נסיעות חריג ({exceptionalRides.length})
+              נסיעות חריג ({exceptionalRideCount})
             </button>
             <button
               onClick={() => setActiveTab('delayed')}
@@ -490,7 +480,7 @@ const ZeroPriceRides = memo(function ZeroPriceRides({
                 ייצא נסיעות
               </motion.button>
               <span className="text-xs text-gray-600">
-                ({exceptionalRides.length} נסיעות)
+                ({exceptionalRideCount} נסיעות, {exceptionalPassengerCount} עובדים חריגים)
               </span>
             </div>
           </div>
@@ -668,7 +658,7 @@ const ZeroPriceRides = memo(function ZeroPriceRides({
                           </td>
                           <td className="px-6 py-4 text-sm text-gray-700">
                             {activeTab === 'exceptional' 
-                              ? extractExceptionalPassengers(ride.passengers || getEmployeeNames(ride.pids) || '')
+                              ? (getExceptionalPassengerLabels(ride) || extractExceptionalPassengers(ride.passengers || getEmployeeNames(ride.pids) || ''))
                               : (ride.passengers || getEmployeeNames(ride.pids) || '-')}
                           </td>
                         </>

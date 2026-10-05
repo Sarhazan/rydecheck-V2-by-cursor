@@ -12,6 +12,7 @@ import ActivityLogModal from './components/ActivityLogModal';
 import { parseFile } from './utils/fileParser';
 import { matchAllSuppliers } from './utils/rideMatcher';
 import { calculateDepartmentBreakdown } from './utils/departmentCalculator';
+import { createManualEmployeeFromRideAssignment } from './utils/exceptionalRides';
 import { generateAllDemoData } from './utils/demoDataGenerator';
 import { logActivity, getAllActivities } from './utils/activityLogger';
 import { handleError } from './utils/errorHandler';
@@ -643,12 +644,10 @@ function App() {
               // אם העובד לא קיים, ניצור אותו עם המידע הבסיסי
               const ride = parsedData.rides.find(r => r.rideId === rideId);
               if (ride) {
-                updatedEmployeeMap.set(employeeId, {
-                  employeeId: employeeId,
-                  firstName: `PID ${employeeId}`,
-                  lastName: '',
-                  department: department
-                });
+                updatedEmployeeMap.set(
+                  employeeId,
+                  createManualEmployeeFromRideAssignment(ride, employeeId, department)
+                );
               }
             }
           }
