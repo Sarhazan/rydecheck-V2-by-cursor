@@ -608,8 +608,9 @@ function App() {
       setIsAnalyzing(true);
       setError(null);
 
-      // יצירת עותק של employeeMap לעדכון
+      // יצירת עותקים לעדכון
       const updatedEmployeeMap = new Map(parsedData.employeeMap);
+      const updatedPassengerDepartments = new Map(passenger55555Departments);
       
       // עדכון המחלקות של העובדים
       employeeDepartmentAssignments.forEach((department, key) => {
@@ -617,17 +618,30 @@ function App() {
         
         // key יכול להיות `${rideId}-${employeeId}` או `ride-${rideId}`
         if (key.startsWith('ride-')) {
-          // זה שיוך של נסיעה כולה ללא PIDs - נצטרך למצוא את ה-PIDs מהנסיעה
-          const rideId = parseInt(key.replace('ride-', ''));
-          const ride = parsedData.rides.find(r => r.rideId === rideId);
+          // זה שיוך של נסיעה כולה ללא PIDs.
+          // rideId יכול להיות מספר רגיל או מזהה ידני כמו MANUAL_gett_104610996,
+          // לכן אסור לעשות parseInt שמחזיר NaN ומפיל שיוכים מרוכזים של נסיעות ידניות.
+          const rideIdRaw = key.slice('ride-'.length);
+          const rideIdNumber = Number.parseInt(rideIdRaw, 10);
+          const rideId = Number.isNaN(rideIdNumber) || String(rideIdNumber) !== rideIdRaw
+            ? rideIdRaw
+            : rideIdNumber;
+          const ride = parsedData.rides.find(r => String(r.rideId) === String(rideId));
           if (ride && ride.pids && ride.pids.length > 0) {
             // אם יש PIDs, נעדכן אותם
             ride.pids.forEach(pid => {
-              const employee = updatedEmployeeMap.get(pid);
+              const employee = updatedEmployeeMap.get(pid) || updatedEmployeeMap.get(String(pid));
               if (employee) {
                 updatedEmployeeMap.set(pid, { ...employee, department });
+                updatedEmployeeMap.set(String(pid), { ...employee, department });
+              } else {
+                updatedEmployeeMap.set(pid, createManualEmployeeFromRideAssignment(ride, pid, department));
+                updatedEmployeeMap.set(String(pid), createManualEmployeeFromRideAssignment(ride, pid, department));
               }
             });
+          } else if (ride) {
+            // נסיעה ידנית ללא PIDs: שומרים שיוך ברמת הנסיעה עצמה.
+            updatedPassengerDepartments.set(ride.rideId, department);
           }
         } else {
           // זה שיוך של עובד ספציפי
@@ -657,8 +671,10 @@ function App() {
       // עדכון parsedData עם employeeMap המעודכן
       setParsedData(prev => ({
         ...prev,
-        employeeMap: updatedEmployeeMap
+        employeeMap: updatedEmployeeMap,
+        passenger55555Departments: updatedPassengerDepartments
       }));
+      setPassenger55555Departments(updatedPassengerDepartments);
 
       // סינון נסיעות שהוסרו מהרייד לפני חישוב ההתפלגות המחלקתית
       const filteredRides = parsedData.rides.filter(ride => {
@@ -670,7 +686,7 @@ function App() {
       });
 
       // חישוב מחדש של ההתפלגות המחלקתית
-      const deptData = calculateDepartmentBreakdown(filteredRides, updatedEmployeeMap, passenger55555Departments);
+      const deptData = calculateDepartmentBreakdown(filteredRides, updatedEmployeeMap, updatedPassengerDepartments);
       setDepartmentData(deptData);
 
     } catch (err) {
@@ -678,7 +694,7 @@ function App() {
     } finally {
       setIsAnalyzing(false);
     }
-  }, [parsedData, tripsRemovedFromReview]);
+  }, [parsedData, tripsRemovedFromReview, passenger55555Departments]);
 
   const handleExportDepartments = useCallback(async () => {
     if (!departmentData) {

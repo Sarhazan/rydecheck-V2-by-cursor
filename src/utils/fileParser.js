@@ -41,6 +41,20 @@ export function extractPids(historyField) {
     .filter(pid => !isNaN(pid));
 }
 
+export function extractPidsFromPassengerField(passengersField) {
+  if (!passengersField) return [];
+
+  return String(passengersField)
+    .split(/[;\n]/)
+    .map(part => part.trim())
+    .filter(Boolean)
+    .map(part => {
+      const match = part.match(/(?:^|\s)(\d{3,7})\s*$/);
+      return match ? parseInt(match[1], 10) : null;
+    })
+    .filter(pid => Number.isInteger(pid));
+}
+
 function extractGettOrderId(historyField) {
   if (!historyField) return null;
   const orderMatch = String(historyField).match(/\|gettorderid=([^|]+)\|/i);
@@ -152,10 +166,17 @@ function processRidesData(data, resolve, headers = []) {
       passengerNames = [];
     }
     
-    // איחוד pids משני המקומות (ללא כפילויות)
-    const allPids = useOnlyHistoryPids 
+    // איחוד pids משני המקומות (ללא כפילויות).
+    // אם אין pids בשדות ההיסטוריה, ננסה fallback ממספר עובד בסוף שדה הנוסעים
+    // (לדוגמה: "כלנית אזולאי 43589;"). לא מערבבים fallback כזה כשיש history pids,
+    // כדי לא לשנות נסיעות קיימות שבהן מזהי ההיסטוריה הם המקור המוסמך.
+    const historyBasedPids = useOnlyHistoryPids 
       ? historyPids 
       : [...new Set([...historyPids, ...altPids])];
+    const passengerFieldPids = historyBasedPids.length === 0
+      ? extractPidsFromPassengerField(passengersField)
+      : [];
+    const allPids = historyBasedPids.length > 0 ? historyBasedPids : passengerFieldPids;
     
     // חילוץ מחיר - ננסה כמה אפשרויות
     let priceRaw = cleanRow.מחיר || '';
@@ -426,10 +447,25 @@ export function parseEmployeesFile(data) {
             };
           }).filter(emp => emp.employeeId !== null);
 
-          // יצירת מפה מהירה לחיפוש לפי ID
+          // יצירת מפה מהירה לחיפוש לפי ID + מזהי alias נפוצים כמו "מספר נוסע".
+          // בחלק מדוחות Ride, כשחסר |pids=...| בהיסטוריה, שדה הנוסעים מכיל את "מספר נוסע"
+          // ולא את ה-_ID הפנימי. לכן המפה צריכה לזהות גם את המספר הזה.
           const employeeMap = new Map();
           employees.forEach(emp => {
             employeeMap.set(emp.employeeId, emp);
+
+            const aliasCandidates = [
+              emp.rawData?.['מספר נוסע'],
+              emp.rawData?.['אימייל (שם משתמש)']
+            ];
+
+            aliasCandidates.forEach(aliasRaw => {
+              const alias = aliasRaw ? parseInt(String(aliasRaw).replace(/[^0-9]/g, '')) : null;
+              if (!isNaN(alias) && alias > 0 && !employeeMap.has(alias)) {
+                employeeMap.set(alias, emp);
+                employeeMap.set(String(alias), emp);
+              }
+            });
           });
 
           resolve({ employees, employeeMap });

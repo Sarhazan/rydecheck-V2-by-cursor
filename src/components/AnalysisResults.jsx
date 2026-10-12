@@ -13,6 +13,7 @@ import { shouldShowNotesField } from '../utils/supplierHelpers';
 import { useSummary } from './AnalysisResults/hooks/useSummary';
 import { useFilteredResults } from './AnalysisResults/hooks/useFilteredResults';
 import { logActivity, getAllActivities } from '../utils/activityLogger';
+import { formatPassengerDisplay } from '../utils/passengerDisplay';
 
 // Icons
 import { CheckCircle2, AlertCircle, XCircle, TrendingUp, DollarSign, Users, FileX, Plus, Edit2, Check, X, ArrowUp, ArrowDown, Download } from 'lucide-react';
@@ -79,37 +80,7 @@ const AnalysisResults = memo(function AnalysisResults({ matchResults, employeeMa
    * @returns {string} מחרוזת עם שמות העובדים או המחרוזת המקורית אם לא נמצאו שמות
    */
   const getEmployeeNames = useCallback((passengersStr) => {
-    if (!passengersStr || !employeeMap) return passengersStr || '-';
-    
-    const trimmed = String(passengersStr).trim();
-    const parts = trimmed.split(/[,;|\s]+/).filter(p => p.trim().length > 0);
-    if (parts.length === 0) return passengersStr;
-    
-    const names = [];
-    let foundAnyName = false;
-    
-    parts.forEach(part => {
-      const trimmedPart = part.trim();
-      const numberMatch = trimmedPart.match(/^\d+$/);
-      if (numberMatch) {
-        const employeeId = parseInt(numberMatch[0]);
-        if (!isNaN(employeeId)) {
-          const employee = employeeMap.get(employeeId);
-          if (employee) {
-            names.push(`${employee.firstName} ${employee.lastName}`.trim());
-            foundAnyName = true;
-          } else {
-            names.push(trimmedPart);
-          }
-        } else {
-          names.push(trimmedPart);
-        }
-      } else {
-        names.push(trimmedPart);
-      }
-    });
-    
-    return foundAnyName ? names.join(', ') : passengersStr;
+    return formatPassengerDisplay(passengersStr, employeeMap);
   }, [employeeMap]);
 
   /**
